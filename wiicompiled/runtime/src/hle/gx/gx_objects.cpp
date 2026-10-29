@@ -99,11 +99,18 @@ bool g_texObjIntervalsRebuildAll = true;
 // lengthens the walk, so the patch path only ever raises it and rebuild recomputes it exactly.
 uint32_t g_texObjIntervalMaxSize = 0;
 
-// Address bounds of every registered TLUT payload, so a DCStoreRange over an
-// unrelated buffer can skip the g_TlutObjMeta scan entirely. Recomputed lazily
-// because TLUT registration is far rarer than cache flushes.
-uint64_t g_tlutObjBoundsStart = 0;
-uint64_t g_tlutObjBoundsEnd = 0;
+// Every registered TLUT payload range, sorted by start, so a cache flush finds the palettes it overlaps by
+// binary search instead of walking g_TlutObjMeta (REX's character select flushes thousands of buffers a frame
+// with hundreds of palettes registered). Rebuilt lazily, only when an init changes a payload range: games
+// re-init the same stack object with the same palette every frame. Map nodes are never erased, so the
+// metadata pointers stay valid.
+struct TlutInterval {
+    uint64_t start;
+    uint64_t end;
+    TlutObjMeta* meta;
+};
+std::vector<TlutInterval> g_tlutIntervals;
+uint64_t g_tlutIntervalMaxSize = 0;
 bool g_tlutObjBoundsDirty = true;
 
 // Guest GXTexObj is 32 bytes: word0 wrap/filter bits, word1 LOD bits, word2 width/height/format,
@@ -384,26 +391,20 @@ void EnsureTlutObjBoundsLocked() {
     if (!g_tlutObjBoundsDirty) {
         return;
     }
-
-    uint64_t boundsStart = std::numeric_limits<uint64_t>::max();
-    uint64_t boundsEnd = 0;
-    for (const auto& [objAddr, meta] : g_TlutObjMeta) {
+    g_tlutIntervals.clear();
+    g_tlutIntervalMaxSize = 0;
+    for (auto& [objAddr, meta] : g_TlutObjMeta) {
         (void)objAddr;
         if (meta.dataAddr == 0 || meta.entries == 0 || !IsKnownTlutFormat(meta.format)) {
             continue;
         }
         const uint64_t tlutStart = CanonicalizeGxMainRamAddress(meta.dataAddr);
-        const uint64_t tlutEnd = tlutStart + static_cast<uint64_t>(meta.entries) * 2u;
-        boundsStart = std::min(boundsStart, tlutStart);
-        boundsEnd = std::max(boundsEnd, tlutEnd);
+        const uint64_t size = static_cast<uint64_t>(meta.entries) * 2u;
+        g_tlutIntervals.push_back({tlutStart, tlutStart + size, &meta});
+        g_tlutIntervalMaxSize = std::max(g_tlutIntervalMaxSize, size);
     }
-    if (boundsStart >= boundsEnd) {
-        boundsStart = 0;
-        boundsEnd = 0;
-    }
-
-    g_tlutObjBoundsStart = boundsStart;
-    g_tlutObjBoundsEnd = boundsEnd;
+    std::sort(g_tlutIntervals.begin(), g_tlutIntervals.end(),
+              [](const TlutInterval& a, const TlutInterval& b) { return a.start < b.start; });
     g_tlutObjBoundsDirty = false;
 }
 
@@ -535,8 +536,11 @@ TexObjMeta& GetTexObjMeta(uint32_t addr) {
 // Same contract as GetTexObjMeta: the caller mutates the returned reference, so
 // the cached TLUT address bounds have to be recomputed before the next flush.
 TlutObjMeta& GetTlutObjMeta(uint32_t addr) {
-    g_tlutObjBoundsDirty = true;
     return g_TlutObjMeta[addr];
+}
+
+void NoteTlutObjRangeChangedLocked() {
+    g_tlutObjBoundsDirty = true;
 }
 
 GXTexObj* GetHostTexObj(uint32_t addr) {
@@ -667,10 +671,11 @@ extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size) {
 
 GXTlutObj* CreateHostTlutObj(uint32_t addr) {
     auto& slot = g_HostTlutObjMap[addr];
+    // A re-initialized object keeps its storage: GXInitTlutObj rewrites it whole, and destroying it first evicted
+    // every texture cached against that palette (REX's character select re-inits each icon's palette every frame and
+    // rebuilt all of them). A changed palette still gets a new data version from GXInitTlutObj.
     if (!slot) {
         slot = std::make_unique<HleTlutObj>();
-    } else {
-        slot->Destroy();
     }
     slot->EnsureStorageLive();
     return slot->PublicPtr();
@@ -707,24 +712,16 @@ void MarkTlutObjsDirtyForRange(uint32_t addr, uint32_t size) {
     const uint64_t dirtyEnd = dirtyStart + size;
     std::lock_guard<std::mutex> guard(g_tlutObjMutex);
     EnsureTlutObjBoundsLocked();
-    // Most DCStoreRange calls flush small material/vertex buffers that live
-    // nowhere near a palette, so reject them without walking the map.
-    if (g_tlutObjBoundsStart >= g_tlutObjBoundsEnd ||
-        dirtyEnd <= g_tlutObjBoundsStart ||
-        dirtyStart >= g_tlutObjBoundsEnd) {
-        return;
+    const auto lower = std::lower_bound(
+        g_tlutIntervals.begin(), g_tlutIntervals.end(), dirtyStart,
+        [](const TlutInterval& entry, uint64_t key) { return entry.start < key; });
+    // Earlier-starting palettes can still reach dirtyStart, up to the largest palette's size back.
+    for (auto it = lower; it != g_tlutIntervals.begin();) {
+        --it;
+        if (it->start + g_tlutIntervalMaxSize <= dirtyStart) break;
+        if (it->end > dirtyStart) it->meta->dirty = true;
     }
-    for (auto& [objAddr, meta] : g_TlutObjMeta) {
-        if (meta.dataAddr == 0 || meta.entries == 0 || !IsKnownTlutFormat(meta.format)) {
-            continue;
-        }
-
-        const uint64_t tlutStart = CanonicalizeGxMainRamAddress(meta.dataAddr);
-        const uint64_t tlutEnd = tlutStart + static_cast<uint64_t>(meta.entries) * 2u;
-        if (dirtyEnd <= tlutStart || dirtyStart >= tlutEnd) {
-            continue;
-        }
-
-        meta.dirty = true;
+    for (auto it = lower; it != g_tlutIntervals.end() && it->start < dirtyEnd; ++it) {
+        it->meta->dirty = true;
     }
 }

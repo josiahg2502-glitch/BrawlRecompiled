@@ -34,6 +34,8 @@ constexpr uint8_t GX_DRAW_POINTS_CMD         = 0xB8;
 
 } // namespace GxCmd
 
+void ForgetAppliedAuroraArray(int attr);  // gx_dl.cpp
+
 namespace GxStream {
 
 // --- Big-endian scalar reads out of a command stream ---------------------
@@ -334,6 +336,8 @@ inline bool ApplyIndexedXfArrayForPacket(uint8_t cmd, uint32_t value) {
     }
 
     GXSetArray(static_cast<GXAttr>(attr), hostPtr, span, static_cast<uint8_t>(arr.stride));
+    // This span only covers `index`; the display-list path must not think its wider binding is still live.
+    ForgetAppliedAuroraArray(attr);
     return true;
 }
 

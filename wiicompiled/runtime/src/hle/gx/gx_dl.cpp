@@ -1289,6 +1289,10 @@ static bool ApplyAuroraIndexedXFArraysForDisplayList(const std::array<uint32_t, 
 
 } // namespace
 
+void ForgetAppliedAuroraArray(int attr) {
+    if (attr >= 0 && attr < GX_VA_MAX_ATTR) s_appliedArrays[attr].valid = false;
+}
+
 extern "C" unsigned g_spmAudit[8];  // aurora command_processor (SPM diagnostics)
 extern "C" int g_spmSweepDump;
 extern "C" void GxNotifyDisplayListMemoryWrite(uint32_t addr, uint32_t size) {

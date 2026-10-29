@@ -188,12 +188,14 @@ struct StaticPaletteTextureKey {
   const void* tlutData = nullptr;
   u32 tlutFormat = 0;
   u32 tlutEntries = 0;
-  u32 tlutDataVersion = 0;
+  // The palette's bytes, not its data version: REX copies each icon's palette into one shared buffer before drawing
+  // it, which bumps the version every draw, so a version key never hit and rebuilt every icon every frame.
+  u64 tlutDigest = 0;
 
   bool operator==(const StaticPaletteTextureKey& rhs) const = default;
   template <typename H>
   friend H AbslHashValue(H h, const StaticPaletteTextureKey& key) {
-    return H::combine(std::move(h), key.texture, key.tlutData, key.tlutFormat, key.tlutEntries, key.tlutDataVersion);
+    return H::combine(std::move(h), key.texture, key.tlutData, key.tlutFormat, key.tlutEntries, key.tlutDigest);
   }
 };
 
@@ -463,7 +465,7 @@ StaticPaletteTextureKey make_static_palette_texture_key(const GXTexObj_& obj, co
       .tlutData = tlut.data,
       .tlutFormat = static_cast<u32>(tlut.format),
       .tlutEntries = tlut.numEntries,
-      .tlutDataVersion = tlut.tlutDataVersion,
+      .tlutDigest = digest_source_bytes(tlut.data, static_cast<size_t>(tlut.numEntries) * sizeof(u16)),
   };
 }
 
@@ -724,7 +726,9 @@ gfx::TextureHandle resolve_static_palette_texture(const GXTexObj_& obj, const GX
   if (!obj.no_cache() && !tlut.no_cache()) {
     store_cached_texture(obj, handle, tlut.tlutObjId, tlut.tlutDataVersion);
     if (canUseSourceCache) {
-      if (s_staticPaletteTextureSourceCache.size() >= 256) {
+      // REX's character select draws ~300 palette icons through one reused texture object, so only this cache
+      // holds them: a 256 cap rebuilt ~150 of them every frame.
+      if (s_staticPaletteTextureSourceCache.size() >= 1024) {
         absl::erase_if(s_staticPaletteTextureSourceCache, [](const auto& item) { return item.second.handle.use_count() <= 1; });
       }
       s_staticPaletteTextureSourceCache[sourceKey] = make_static_palette_texture_source_entry(sourceKey, handle);

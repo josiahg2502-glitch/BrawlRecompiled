@@ -270,8 +270,13 @@ std::atomic_bool s_dropInterpolationAtSeal{false};
 std::atomic_uint32_t s_pacingWindowFrames{0};
 std::atomic_uint32_t s_pacingWindowMisses{0};
 constexpr uint32_t kPacingWindowFrames = 60; // ~1 second of guest frames
-constexpr uint32_t kPacingReducePercent = 75;
-constexpr uint32_t kPacingRestorePercent = 25;
+// Inserted slots must never cost game speed: a GPU-bound 240 (four renders a frame at 4K) at the old 75% threshold
+// held the game at 50 fps. One late frame in ten backs a slot off; a slot comes back only after clean windows, and
+// a slot that keeps tripping waits twice as long each time (up to ~30 s), so the rate doesn't flap every second.
+constexpr uint32_t kPacingReducePercent = 10;
+constexpr uint32_t kPacingMaxRestoreWindows = 32;
+std::atomic_uint32_t s_pacingCleanWindows{0};
+std::atomic_uint32_t s_pacingRestoreWindows{1};
 
 uint32_t maximum_interpolation_samples() noexcept {
   const uint32_t targetFps = frame_interpolation_fps();
@@ -736,6 +741,8 @@ void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
   s_dropInterpolationAtSeal.store(false, std::memory_order_release);
   s_pacingWindowFrames.store(0, std::memory_order_release);
   s_pacingWindowMisses.store(0, std::memory_order_release);
+  s_pacingCleanWindows.store(0, std::memory_order_release);
+  s_pacingRestoreWindows.store(1, std::memory_order_release);
   // A reconfiguration starts a fresh diagnostic window.
   s_diagFramesSealed.store(0, std::memory_order_relaxed);
   s_diagFramesLowMatch.store(0, std::memory_order_relaxed);
@@ -771,18 +778,27 @@ void report_producer_paced(bool paced) noexcept {
   uint32_t target =
       std::min(s_interpolationSampleTarget.load(std::memory_order_acquire), maximumSamples);
   if (misses * 100u >= frames * kPacingReducePercent) {
+    s_pacingCleanWindows.store(0, std::memory_order_release);
     if (target > 0) {
       --target;
+      s_pacingRestoreWindows.store(
+          std::min(s_pacingRestoreWindows.load(std::memory_order_acquire) * 2, kPacingMaxRestoreWindows),
+          std::memory_order_release);
       s_diagSlotReductions.fetch_add(1, std::memory_order_relaxed);
       Log.info("interpolation slots reduced to {}: {}/{} frames overran their retrace budget",
                target, misses, frames);
     }
-  } else if (misses * 100u <= frames * kPacingRestorePercent) {
-    if (target < maximumSamples) {
+  } else if (misses == 0) {
+    const uint32_t clean = s_pacingCleanWindows.load(std::memory_order_acquire) + 1;
+    if (target < maximumSamples && clean >= s_pacingRestoreWindows.load(std::memory_order_acquire)) {
       ++target;
-      Log.info("interpolation slots restored to {}: {}/{} frames overran their retrace budget",
-               target, misses, frames);
+      s_pacingCleanWindows.store(0, std::memory_order_release);
+      Log.info("interpolation slots restored to {} after {} clean seconds", target, clean);
+    } else {
+      s_pacingCleanWindows.store(clean, std::memory_order_release);
     }
+  } else {
+    s_pacingCleanWindows.store(0, std::memory_order_release);
   }
   s_interpolationSampleTarget.store(target, std::memory_order_release);
   s_pacingWindowFrames.store(0, std::memory_order_release);
@@ -858,6 +874,7 @@ void finalize_frame_interpolation() noexcept {
   static std::vector<size_t> groupPreviousIndices;
   static std::vector<MatchEdge> edges;
   static std::unordered_map<uint64_t, std::vector<uint32_t>> gridCells;
+  static std::unordered_map<uint64_t, std::vector<uint32_t>> exactPositions;
   currentToPrevious.assign(s_currentFrameTransforms.size(), SIZE_MAX);
   previousMatched.assign(s_previousFrameTransforms.size(), 0);
   currentMatched.assign(s_currentFrameTransforms.size(), 0);
@@ -921,6 +938,47 @@ void finalize_frame_interpolation() noexcept {
         previousMatched[groupPreviousIndices.front()] = 1;
         currentMatched[groupCurrentIndices.front()] = 1;
         continue;
+      }
+
+      // Draws whose matrix did not change are paired first, by an exact-bytes lookup: they are the
+      // distance-0 edges the sort below would take first anyway, and a static crowd sharing one
+      // signature (REX's 300 character-select icons) otherwise builds tens of thousands of edges a frame.
+      if (groupPreviousIndices.size() * groupCurrentIndices.size() > kAllPairsEdgeLimit) {
+        const auto matrixHash = [](const Mat3x4<float>& m) {
+          uint64_t h = 1469598103934665603ull;
+          const auto* bytes = reinterpret_cast<const uint8_t*>(&m);
+          for (size_t b = 0; b < sizeof(m); ++b) h = (h ^ bytes[b]) * 1099511628211ull;
+          return h;
+        };
+        exactPositions.clear();
+        for (const size_t previousIndex : groupPreviousIndices) {
+          const auto& previousTransform = s_previousFrameTransforms[previousIndex].transform;
+          if (!previousTransform.indexedMatrices) {
+            exactPositions[matrixHash(previousTransform.position)].push_back(static_cast<uint32_t>(previousIndex));
+          }
+        }
+        for (const size_t currentIndex : groupCurrentIndices) {
+          const auto& currentTransform = s_currentFrameTransforms[currentIndex].transform;
+          if (currentTransform.indexedMatrices) continue;
+          const auto it = exactPositions.find(matrixHash(currentTransform.position));
+          if (it == exactPositions.end()) continue;
+          for (const uint32_t previousIndex : it->second) {
+            if (previousMatched[previousIndex] ||
+                std::memcmp(&s_previousFrameTransforms[previousIndex].transform.position, &currentTransform.position,
+                            sizeof(currentTransform.position)) != 0) {
+              continue;
+            }
+            currentToPrevious[currentIndex] = previousIndex;
+            previousMatched[previousIndex] = 1;
+            currentMatched[currentIndex] = 1;
+            break;
+          }
+        }
+        std::erase_if(groupCurrentIndices, [&](size_t index) { return currentMatched[index] != 0; });
+        std::erase_if(groupPreviousIndices, [&](size_t index) { return previousMatched[index] != 0; });
+        if (groupCurrentIndices.empty() || groupPreviousIndices.empty()) {
+          continue;
+        }
       }
 
       // Drop pairs past the translation gate (`<=` also drops a NaN delta): they can only

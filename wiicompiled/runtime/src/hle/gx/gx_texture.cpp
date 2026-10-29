@@ -785,6 +785,7 @@ PPC_NATIVE_OVERRIDE_VOID(801c7260, GX__GetTexObjLODAll_80170cbc, (uint32_t oa, u
 
 extern "C" void GX__InitTlutObj_80170f80(uint32_t oa, uint32_t da, uint32_t f, uint32_t e) {
     std::lock_guard<std::mutex> guard(g_tlutObjMutex); GXTlutObj* obj = CreateHostTlutObj(oa); TlutObjMeta& meta = GetTlutObjMeta(oa);
+    if (meta.dataAddr != CanonicalizeGxMainRamAddress(da) || meta.format != f || meta.entries != (u16)e) NoteTlutObjRangeChangedLocked();
     meta.dataAddr=CanonicalizeGxMainRamAddress(da); meta.format=f; meta.entries=(u16)e; meta.dirty=false;
     // Fill the guest struct's hardware layout like the SDK does, so GXLoadTlut's inline-object path below reads this
     // object as current instead of stale stack bytes (Brawl's HUD reuses one stack object for every portrait).

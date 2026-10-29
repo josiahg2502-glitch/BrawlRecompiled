@@ -53,6 +53,7 @@ constexpr const char* kSaveFiles[] = {
     "title/00010000/52534245/data/autosv1.bin",
     "title/00010000/52534245/data/advsv0.bin",
     "title/00010000/52534245/data/advsv1.bin",
+    "title/00010000/52534245/data/collect.vff",
 };
 
 // Copies the session's save over the player's own. Call with the NAND override cleared.

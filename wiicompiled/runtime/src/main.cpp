@@ -248,7 +248,9 @@ void PruneOldRunLogs(const std::filesystem::path& logRoot) {
 // folder" is a complete diagnostic. Created lazily so even a crash before
 // transcript setup still has somewhere to write.
 const std::filesystem::path& GetRunLogDirectory() {
-    static const std::filesystem::path runDirectory = [] {
+    // Never destroyed: a crash log written during exit (std::terminate from a static's destructor) used to read this
+    // after its destructor ran and created a file with a garbage name next to the executable.
+    static const std::filesystem::path& runDirectory = *new std::filesystem::path([] {
         const std::filesystem::path logRoot = GetDefaultRuntimeLogDirectory();
 
         std::error_code ec;
@@ -269,7 +271,7 @@ const std::filesystem::path& GetRunLogDirectory() {
         const std::filesystem::path directory = logRoot / name.str();
         std::filesystem::create_directories(directory, ec);
         return directory;
-    }();
+    }());
     return runDirectory;
 }
 
@@ -832,7 +834,8 @@ void ShowRuntimeFatalPopup(std::string_view category, std::string_view details) 
                 message.append("\n\n[Additional details were written to the crash log.]");
             }
         }
-        message.append("\n\nSee the WiiCompiled Logs folder for the full diagnostic.");
+        message.append("\n\nThe full log of this run is console.log in:\n");
+        message.append(RuntimeConfigFile::PathToUtf8(GetRunLogDirectory()));
 #if defined(_WIN32)
         ::MessageBoxA(nullptr, message.c_str(), "WiiCompiled - Fatal Error",
                       MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TASKMODAL);
@@ -897,7 +900,10 @@ void RuntimeAuroraLogCallback(AuroraLogLevel level, const char* module,
     std::cerr << "[aurora] [" << static_cast<int>(level) << "] [" << moduleView << "] "
               << messageView << std::endl;
     if (level == LOG_FATAL) {
-        ShowRuntimeFatalPopup("Aurora reported a fatal renderer error", messageView);
+        std::string details(messageView);
+        details += "\n\nOn older or integrated graphics, updating the graphics driver from the GPU maker's site and "
+                   "lowering Resolution (F10, or resolution_multiplier = 1.0 in UserData/Config.toml) usually helps.";
+        ShowRuntimeFatalPopup("Aurora reported a fatal renderer error", details);
     }
 }
 

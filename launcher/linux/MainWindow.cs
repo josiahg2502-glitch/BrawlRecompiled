@@ -668,7 +668,7 @@ sealed class MainWindow : Window
         // The game's own 16:9 mode (its widescreen switch) or 4:3; "fill" stretches the 16:9 camera to wider screens.
         body.Children.Add(Choice("Aspect ratio", "aspect_mode", new[] { ("16:9 (the game's own widescreen)", "1"), ("Fill the screen (ultrawide)", "2"), ("Original 4:3", "0") },
             also: value => config.Set("video", "widescreen", value == "0" ? "false" : "true")));
-        body.Children.Add(Choice("Frame interpolation", "frame_interpolation_fps", new[] { ("120 FPS (on a 120 Hz or faster screen)", "120"), ("Off (60 FPS)", "0"), ("180 FPS (on a 180 Hz or faster screen)", "180") }));
+        body.Children.Add(Choice("Frame interpolation", "frame_interpolation_fps", new[] { ("120 FPS (on a 120 Hz or faster screen)", "120"), ("Off (60 FPS)", "0"), ("180 FPS (on a 180 Hz or faster screen)", "180"), ("240 FPS (on a 240 Hz or faster screen)", "240") }));
         body.Children.Add(Choice("Vsync", "vsync", new[] { ("On (no screen tearing)", "true"), ("Off", "false") }));
         body.Children.Add(Choice("FPS counter", "show_fps", new[] { ("Hidden", "false"), ("Shown", "true") }));
         body.Children.Add(Note("Changes are saved at once and used the next time the game starts. The same settings are in the game's F10 menu. " +

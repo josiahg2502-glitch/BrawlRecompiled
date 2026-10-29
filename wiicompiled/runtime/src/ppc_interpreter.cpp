@@ -196,16 +196,23 @@ bool BranchTaken(CpuContext* c, uint32_t bo, uint32_t bi) {
     return ctrOk && condOk;
 }
 
+// Translated callees leave the volatile FPRs in the forms their own code wrote, which the interpreter cannot see, so
+// those are read in the form their consumer expects. f14-f31 are callee-saved: every callee (translated, or
+// interpreted with its stfd/psq_st save and lfd/psq_l restore) hands back the caller's exact bits, so their forms
+// still hold. Forgetting them made a paired value kept across a call (a vector in f31) read as a double by the next
+// scalar op: horizontal speeds blew up when a mod's sora_melee ran in the interpreter.
+void ForgetVolatileForms(Frame& f) {
+    for (int r = 0; r < 14; ++r) f.form[r] = Form::Unknown;
+}
+
 // A call (bl, bcl, blrl, bctrl). Translated, native and patched code runs through the function registry; other code
 // (a mod's) returns false and is interpreted right here, as the processor would run it: code that does not return the
 // usual way (bl to read its own address, a hook that branches back) must not leave a host call frame behind.
 bool Call(Frame& f, uint32_t target, uint32_t returnTo) {
     f.ctx->lr = returnTo;
     if (TranslatedFunctionRegistry::FindByAddressPtr(target) == nullptr && CanRun(target)) return false;
-    // Translated callees leave the FPRs in the forms their own code wrote, which the interpreter cannot see; after a
-    // call every register is read in the form its consumer expects.
     InvokeIndirectCpu(target, f.ctx);
-    for (auto& form : f.form) form = Form::Unknown;
+    ForgetVolatileForms(f);
     return true;
 }
 
@@ -216,7 +223,7 @@ bool Call(Frame& f, uint32_t target, uint32_t returnTo) {
 bool TailCall(Frame& f, uint32_t target, uint32_t returnAddress) {
     const uint32_t back = f.ctx->lr & ~3u;
     InvokeIndirectCpu(target, f.ctx);
-    for (auto& form : f.form) form = Form::Unknown;
+    ForgetVolatileForms(f);
     f.ctx->lr = back;
     return back == (returnAddress & ~3u);
 }
@@ -255,6 +262,9 @@ void Run(CpuContext* ctx, uint32_t entry) {
         }
     }
     Frame f{ctx, {}, entry};
+    // Callers hand FPRs over in the scalar CpuContext form (the translator's entry contract), so a float argument
+    // consumed by a paired op is splatted to both lanes, as lfs/fadds leave it on the hardware.
+    for (auto& form : f.form) form = Form::Scalar;
     const uint32_t returnAddress = ctx->lr;
     uint64_t executed = 0;
     const auto& tracePcs = TracePcs();

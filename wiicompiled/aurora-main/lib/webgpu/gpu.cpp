@@ -852,13 +852,14 @@ bool initialize(AuroraBackend auroraBackend) {
     deviceDescriptor.requiredLimits = &requiredLimits;
     deviceDescriptor.SetUncapturedErrorCallback(
         [](const wgpu::Device& device, wgpu::ErrorType type, wgpu::StringView message) {
-          if (g_logValidationErrors.load(std::memory_order_relaxed)) {
+          // Logged, not fatal: with validation skipped what still arrives is mostly an older or integrated GPU
+          // running out of memory or tripping a driver error. Dawn drops that one command and the game goes on,
+          // and a real loss of the device still stops it through the device-lost callback.
+          if (g_logValidationErrors.load(std::memory_order_relaxed) || g_initialized.load(std::memory_order_acquire)) {
             static std::atomic<uint32_t> s_logged{0};
             if (s_logged.fetch_add(1, std::memory_order_relaxed) < 200) {
               Log.error("WebGPU error {}: {}", underlying(type), message);
             }
-          } else if (g_initialized.load(std::memory_order_acquire)) {
-            FATAL("WebGPU error {}: {}", underlying(type), message);
           } else {
             Log.warn("WebGPU error {}: {}", underlying(type), message);
           }

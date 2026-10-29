@@ -110,6 +110,8 @@ int g_frameInterpolationMode = [] {
         return 1;
     case 180:
         return 2;
+    case 240:
+        return 3;
     default:
         return 0;
     }
@@ -208,7 +210,7 @@ constexpr std::array<AspectItem, 4> kAspects = {{
     {"Cinematic 2.39:1", DisplaySettings::kAspectCinematic},
 }};
 
-constexpr std::array<uint32_t, 3> kFrameInterpolationTargetFps{0, 120, 180};
+constexpr std::array<uint32_t, 4> kFrameInterpolationTargetFps{0, 120, 180, 240};
 
 bool IsHighResolutionScale(float scale) {
     return std::fabs(scale - 6.0f) < 0.001f || std::fabs(scale - 8.0f) < 0.001f;
@@ -1204,8 +1206,8 @@ void DrawGraphicsSettings() {
             "Requests the closest native-resolution display mode to the output frame "
             "rate (60 Hz, or the frame interpolation target).");
     }
-    constexpr std::array<const char*, 3> kFrameInterpolationModes{
-        "Off", "120 FPS (120 Hz+ screen)", "180 FPS (180 Hz+ screen)",
+    constexpr std::array<const char*, 4> kFrameInterpolationModes{
+        "Off", "120 FPS (120 Hz+ screen)", "180 FPS (180 Hz+ screen)", "240 FPS (240 Hz+ screen)",
     };
     const char* currentFrameInterpolationMode =
         kFrameInterpolationModes[static_cast<size_t>(g_frameInterpolationMode)];

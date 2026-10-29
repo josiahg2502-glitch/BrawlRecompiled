@@ -38,7 +38,9 @@ using namespace std::chrono_literals;
 constexpr uint32_t kMagic = 0x4C50574Eu;  // "NWPL"
 constexpr uint8_t kVersion = 2;  // 2: Brawl (joins carry the build)
 constexpr size_t kChunk = 1024;
-constexpr size_t kMaxChunks = 1024;  // 1 MiB of (packed) save data at most
+// ~8 MiB of (packed) save data at most: a well-played save (Subspace progress, stickers) packs to near its raw ~2 MB
+// and the Vault's photos and replays in collect.vff add more. The chunk bitmap goes as a U8 count of 32-bit words.
+constexpr size_t kMaxChunks = 255 * 32;
 constexpr auto kTimeout = 6s;
 
 enum Type : uint8_t {
@@ -56,12 +58,16 @@ enum Type : uint8_t {
 };
 
 // The save-related NAND files every device must start from: Brawl's save (both copies of each part) and the Wii's
-// settings.
+// settings. Without collect.vff (the Vault's album, replays and stages) the game takes the save as broken and offers
+// to make a new one, which then went back over the host's own save.
 const char* const kNandFiles[] = {
     "title/00010000/52534245/data/autosv0.bin",
     "title/00010000/52534245/data/autosv1.bin",
     "title/00010000/52534245/data/advsv0.bin",
     "title/00010000/52534245/data/advsv1.bin",
+    "title/00010000/52534245/data/collect.vff",
+    "title/00010000/52534245/data/net0.bin",
+    "title/00010000/52534245/data/net1.bin",
     "title/00010000/52534245/data/banner.bin",
     "title/00000001/00000002/data/setting.txt",
 };
@@ -705,10 +711,12 @@ void HostTickLocked(State& s) {
                 continue;
             }
             m.lastRound = now;
-            for (size_t i = 0; i < m.chunks.size(); ++i) {
+            // At most 256 KiB a round (~2 MB/s): a big save sent whole every round would mostly be dropped.
+            for (size_t i = 0, sent = 0; i < m.chunks.size() && sent < 256; ++i) {
                 if (m.chunks[i]) {
                     continue;
                 }
+                ++sent;
                 Writer w;
                 w.U32(static_cast<uint32_t>(i * kChunk));
                 const size_t n = std::min(kChunk, s.blob.size() - i * kChunk);

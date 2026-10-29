@@ -16,6 +16,8 @@
 #include "fiber_manager.h"
 #include "platform/host_platform.h"
 #include "runtime_log.h"
+#include "ppc_interpreter.h"
+#include "sampling_profiler.h"
 #include "guest_profiler.h"
 
 #include <dolphin/gx/GXAurora.h>
@@ -896,6 +898,7 @@ static void LogWatchedWords() {
 }
 
 void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
+    SamplingProfilerAttachCurrentThread();
     LogWatchedWords();
     GuestCodePatch::Sync();  // code patches made outside the code handler (mod plugins)
     if (s_presentSequenceActive.exchange(true, std::memory_order_acq_rel)) {
@@ -1082,6 +1085,11 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
                     n * 1000.0 / window, times.gameMs / n, gxNanos / 1e6 / n, lockNanos / 1e6 / n, draws / n,
                     copies / n, creates / n, times.endFrameMs / n, times.paceMs / n, times.worstMs,
                     std::sqrt(std::max(0.0, times.sumSq / n - (window / n) * (window / n))), times.slow);
+            static uint64_t lastInstructions = 0;
+            const uint64_t instructions = PpcInterpreter::InstructionCount();
+            RT_LOGF(RT_TAG_VI, "interpreter: %.2fM instructions per frame\n", (instructions - lastInstructions) / 1e6 / n);
+            lastInstructions = instructions;
+            SamplingProfilerReport();
             if (aurora_get_frame_interpolation_fps() != 0) {  // what the screen shows vs the 60 Hz game
                 AuroraPresentTiming present{};
                 aurora_get_present_timing(&present);
