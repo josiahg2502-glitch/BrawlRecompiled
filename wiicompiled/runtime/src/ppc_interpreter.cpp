@@ -201,8 +201,12 @@ bool BranchTaken(CpuContext* c, uint32_t bo, uint32_t bi) {
 // interpreted with its stfd/psq_st save and lfd/psq_l restore) hands back the caller's exact bits, so their forms
 // still hold. Forgetting them made a paired value kept across a call (a vector in f31) read as a double by the next
 // scalar op: horizontal speeds blew up when a mod's sora_melee ran in the interpreter.
+// f1 is the exception: it comes back as the scalar return value, the form translated callers take it in (and Run
+// hands back). Read as a pair, a returned 0.99 and 1.0 scaled a mod's TransN motion by 1.87 * 1.875: dash attacks
+// and rolls went 3.5 times as far.
 void ForgetVolatileForms(Frame& f) {
     for (int r = 0; r < 14; ++r) f.form[r] = Form::Unknown;
+    f.form[1] = Form::Scalar;
 }
 
 // A call (bl, bcl, blrl, bctrl). Translated, native and patched code runs through the function registry; other code
@@ -394,6 +398,7 @@ void Run(CpuContext* ctx, uint32_t entry) {
                 if (BranchTaken(c, RD(w), RA(w))) {
                     if (w & 1u) { if (!Call(f, target, pc + 4)) next = target; break; }
                     if (target == (returnAddress & ~3u)) {
+                        SetScalar(f, 1, Scalar(f, 1));  // the caller takes f1 as the scalar return value
                         g_instructions.fetch_add(executed, std::memory_order_relaxed);
                         return;
                     }

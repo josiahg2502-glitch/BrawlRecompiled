@@ -423,7 +423,8 @@ void ZeroMappedStorage() {
 // BRAWL_WATCH_WRITE=<hex guest address>[:<hex value>]: a debugging aid for mods. Each write to that word (that leaves
 // it holding <value>, when one is given) is logged with the guest state: its page stays read-only, and each write to
 // the page is single-stepped, checked, and the page protected again.
-uint32_t g_watchAddress = 0;
+uint32_t g_watchAddress = 0;  // start of the watched pages
+uint32_t g_watchWord = 0;     // the word itself
 bool g_watchHasValue = false;
 uint32_t g_watchValue = 0;
 bool g_watchAccess = false;  // BRAWL_WATCH_ACCESS=<start>-<end>: every access to those pages, the first ones logged
@@ -435,7 +436,7 @@ thread_local uint32_t t_watchBefore = 0;
 
 uint32_t WatchedWord() {
     uint32_t value = 0;
-    std::memcpy(&value, g_base + g_watchAddress, 4);
+    std::memcpy(&value, g_base + g_watchWord, 4);
     return __builtin_bswap32(value);
 }
 
@@ -449,6 +450,7 @@ void ArmWriteWatch() {
     char* end = nullptr;
     g_watchAddress = static_cast<uint32_t>(std::strtoul(text, &end, 16)) & ~3u;
     if (g_watchAddress == 0) return;
+    g_watchWord = g_watchAddress;
     if (*end == ':') {
         g_watchHasValue = true;
         g_watchValue = static_cast<uint32_t>(std::strtoul(end + 1, nullptr, 16));
@@ -472,7 +474,7 @@ bool HandleWriteWatch(EXCEPTION_POINTERS* info) {
         t_watchRearm = false;
         static int logged = 0;
         if (t_watchHit && (!g_watchHasValue || WatchedWord() == g_watchValue) && logged++ < 40) {
-            RT_LOGF(RT_TAG_MEMORY, "[watch] 0x%08X: 0x%08X -> 0x%08X, guest state:\n", g_watchAddress, t_watchBefore,
+            RT_LOGF(RT_TAG_MEMORY, "[watch] 0x%08X: 0x%08X -> 0x%08X, guest state:\n", g_watchWord, t_watchBefore,
                     WatchedWord());
             SystemBridge::DumpCpuState(TryGetCpuContext());
         }
@@ -495,7 +497,7 @@ bool HandleWriteWatch(EXCEPTION_POINTERS* info) {
         return false;
     }
     const uint32_t guestAddress = static_cast<uint32_t>(fault - reinterpret_cast<uintptr_t>(g_base));
-    t_watchHit = guestAddress + 8 > g_watchAddress && guestAddress < g_watchAddress + 4;
+    t_watchHit = guestAddress + 8 > g_watchWord && guestAddress < g_watchWord + 4;
     if (g_watchAccess) {
         static int logged = 0;
         if (logged == 30) {  // seen enough: let the game run at full speed again
