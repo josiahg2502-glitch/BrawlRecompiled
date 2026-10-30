@@ -5,6 +5,7 @@
 #include "host_context.h"
 #include "runtime_log.h"
 #include "system_bridge.h"
+#include "save_states.h"
 
 // Defined in hle/os/os_sleep.cpp; the sleep-timer table is file-local there.
 
@@ -33,6 +34,7 @@ void GuestFiberManager::PurgePendingFibers() {
     }
     for (void* f : toDelete) {
         if (f && !HostContext::IsCurrent(f)) {
+            SaveStates::ForgetFiber(f);
             HostContext::Destroy(f);
         }
     }
@@ -204,6 +206,7 @@ void GuestFiberManager::Shutdown() {
 
     for (auto& [addr, fiber] : s_fibers) {
         if (fiber.fiber && !fiber.isSchedulerFiber) {
+            SaveStates::ForgetFiber(fiber.fiber);
             HostContext::Destroy(fiber.fiber);
             fiber.fiber = nullptr;
         }
@@ -236,6 +239,7 @@ bool GuestFiberManager::CreateGuestFiber(uint32_t guestThreadAddr, uint32_t entr
     if (existingIt != s_fibers.end()) {
         // Delete the old fiber if it exists and is not the scheduler fiber
         if (existingIt->second.fiber && !existingIt->second.isSchedulerFiber) {
+            SaveStates::ForgetFiber(existingIt->second.fiber);
             HostContext::Destroy(existingIt->second.fiber);
         }
         s_fibers.erase(existingIt);
@@ -327,6 +331,7 @@ void GuestFiberManager::ExitGuestThread(uint32_t guestThreadAddr, ThreadState fi
         if (HostContext::IsCurrent(it->second.fiber)) {
             s_fibersPendingDelete.push_back(it->second.fiber);
         } else {
+            SaveStates::ForgetFiber(it->second.fiber);
             HostContext::Destroy(it->second.fiber);
         }
         it->second.fiber = nullptr;
@@ -411,8 +416,9 @@ void GuestFiberManager::SwitchToThread(uint32_t guestThreadAddr, CpuContext* cpu
         MkwApplyHostNiMode(cpu->fpscr);
     }
 
-    // Switch to the target fiber (the target fiber will load its own context)
-    HostContext::Switch(fiberHandle);
+    // Switch to the target fiber (the target fiber will load its own context). Through SaveStates, so this
+    // thread can later be put back exactly as it is now.
+    SaveStates::SwitchFiber(fiberHandle);
 
     // When we return here, the fiber that issued SwitchToThread has resumed.
     // That does not automatically mean the previous guest thread became runnable
@@ -569,6 +575,8 @@ void CALLBACK GuestFiberManager::FiberProc(void* param)
 void GuestFiberManager::FiberProc(void* param)
 #endif
 {
+    char stackTop = 0;  // nothing above this changes while the thread lives (save_states.h)
+    SaveStates::MarkStackTop(&stackTop + 1);
     uint32_t guestThreadAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(param));
 
 
@@ -679,6 +687,21 @@ void GuestFiberManager::FiberProc(void* param)
     
     // Return to scheduler
     HostContext::Switch(s_schedulerFiber);
+}
+
+std::vector<std::pair<uint32_t, GuestFiber>> GuestFiberManager::CopyFibers(uint32_t& currentGuestThread) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    currentGuestThread = s_currentGuestThread;
+    return {s_fibers.begin(), s_fibers.end()};
+}
+
+void GuestFiberManager::RestoreFibers(const std::vector<std::pair<uint32_t, GuestFiber>>& fibers, uint32_t currentGuestThread) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    // In place: FiberProc keeps a pointer to its entry (the caller checked both sets hold the same threads).
+    for (const auto& [thread, fiber] : fibers) {
+        if (auto it = s_fibers.find(thread); it != s_fibers.end()) it->second = fiber;
+    }
+    s_currentGuestThread = currentGuestThread;
 }
 
 } // namespace Fiber

@@ -15,6 +15,7 @@ sealed class MainForm : Form
 
     readonly bool selfTest;
     readonly string? screenshotDir;
+    readonly bool update;  // --update: the game asked for the new release to be installed
     // Fonts are in points and grow with Windows display scaling; every pixel size goes through S() so it grows too.
     static float k = 1f;
     static int S(int v) => (int)Math.Round(v * k);
@@ -32,9 +33,10 @@ sealed class MainForm : Form
     ListView modList = null!;
     Func<bool>? cancelPadCapture;  // the Controls page's gamepad capture: Escape ends it
 
-    public MainForm(bool selfTest, string? screenshotDir = null)
+    public MainForm(bool selfTest, string? screenshotDir = null, bool update = false)
     {
         this.selfTest = selfTest;
+        this.update = update;
         this.screenshotDir = screenshotDir;
         k = DeviceDpi / 96f;
         content.Padding = S(16, 12, 20, 16);
@@ -121,8 +123,40 @@ sealed class MainForm : Form
                 }
                 Close();
             }
-            else if (selfTest) { foreach (var p in pages) ShowPage(p.button); Environment.ExitCode = !File.Exists(gameExe) ? 6 : !Gamepads.Ready ? 4 : Gamepads.Connected().All(p => Gamepads.Opens(p.id)) ? 0 : 5; Close(); }
+            else if (update) _ = CheckForUpdateAsync();
+            else { foreach (var p in pages) ShowPage(p.button); Environment.ExitCode = !File.Exists(gameExe) ? 6 : !Gamepads.Ready ? 4 : Gamepads.Connected().All(p => Gamepads.Opens(p.id)) ? 0 : 5; Close(); }
         };
+    }
+
+    // #26: the game finds a newer release (its options menu, System) and starts this with --update to install it over
+    // this folder, then the game starts again.
+    async Task CheckForUpdateAsync()
+    {
+        Updater.CleanUp();
+        if (Updater.InstallRoot(EngineExe) is not { } installRoot || await Updater.CheckAsync(AppVersion, linux: false) is not { } release)
+        {
+            if (TryStartGame()) Close();
+            return;
+        }
+        // The game closes itself after starting this; its files can't be replaced while it runs.
+        foreach (var running in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(EngineExe))) running.WaitForExit(30000);
+        string title = Text;
+        Enabled = false;
+        UseWaitCursor = true;
+        try
+        {
+            await Updater.InstallAsync(release, installRoot, p => BeginInvoke(() => Text = $"Updating to v{release.Version}...  {p}%"));
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false });
+            Close();
+        }
+        catch (Exception e)
+        {
+            Enabled = true;
+            UseWaitCursor = false;
+            Text = title;
+            MessageBox.Show(this, "The update could not be installed:\n" + e.Message + "\n\nDownload it from github.com/josiahg2502-glitch/BrawlRecompiled/releases instead.",
+                "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     // The release keeps the game in engine\ (renamed so nobody double-clicks it); the dev tree keeps it in Play\.
@@ -526,6 +560,15 @@ sealed class MainForm : Form
 
     // `online`: what the game's Online menu does at start (BRAWL_ONLINE: "host:<n>", "host-public:<n>", "browse",
     // "join:<code>", "menu"), or null for a normal start.
+    // The usual start: the game straight away (its settings are in its own options menu: F10, or Home on a controller).
+    // False when it can't start yet (no disc set up: this window's first-start setup is needed).
+    public bool TryStartGame()
+    {
+        if (!DiscStatus().ok || !File.Exists(gameExe)) return false;
+        Gamepads.Release();
+        return Process.Start(new ProcessStartInfo(gameExe) { WorkingDirectory = play, UseShellExecute = false }) != null;
+    }
+
     void Launch(string? online = null)
     {
         var (ok, text, _) = DiscStatus();
@@ -944,6 +987,7 @@ sealed class MainForm : Form
             using var dialog = new OpenFileDialog { Title = "Choose your Super Smash Bros. Brawl disc image", Filter = "Wii disc images (*.iso;*.ciso;*.wbfs)|*.iso;*.ciso;*.wbfs|All files|*.*" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             WiiDisc disc;
+            bool extracted = false;
             try { disc = WiiDisc.Open(dialog.FileName); }
             catch (Exception ex) { progressText.Text = "Could not read that image: " + ex.Message; return; }
             using (disc)
@@ -968,6 +1012,7 @@ sealed class MainForm : Form
                     config.SetString("paths", "dvd_root", "../../Disc/DATA");  // relative to <game folder>\UserData (one level below the root in both layouts), so the folder can move
                     config.Save();
                     progressText.Text = "Done. The disc is extracted and ready.";
+                    extracted = true;
                 }
                 catch (Exception ex)
                 {
@@ -980,8 +1025,29 @@ sealed class MainForm : Form
                     RefreshStatus();
                 }
             }
+            // First start: the disc is ready, so on to the game.
+            if (extracted && !selfTest && TryStartGame()) Close();
         };
         body.Controls.Add(choose);
+        // #20: a disc already extracted (by Dolphin, or an earlier install) is used where it is, no image needed.
+        body.Controls.Add(Btn("Use an extracted game folder...", (_, _) =>
+        {
+            using var dialog = new FolderBrowserDialog { Description = "Choose the extracted Super Smash Bros. Brawl folder (the one holding sys and files)" };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            var dir = dialog.SelectedPath;
+            if (!File.Exists(Path.Combine(dir, "sys", "boot.bin")) && File.Exists(Path.Combine(dir, "DATA", "sys", "boot.bin"))) dir = Path.Combine(dir, "DATA");
+            string? before = config.Get("paths", "dvd_root");
+            config.SetString("paths", "dvd_root", dir);
+            var (ok, text, _) = DiscStatus();
+            if (!ok)
+            {
+                if (before == null) config.Remove("paths", "dvd_root"); else config.SetString("paths", "dvd_root", before);
+                progressText.Text = text;
+            }
+            config.Save();
+            RefreshStatus();
+            if (ok && !selfTest && TryStartGame()) Close();
+        }, Card));
         body.Controls.Add(progress);
         body.Controls.Add(progressText);
         body.Controls.Add(dumpHelp = Note(

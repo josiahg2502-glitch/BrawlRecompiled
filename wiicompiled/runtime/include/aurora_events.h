@@ -61,13 +61,18 @@ inline void Flush(bool force = false) {
 // fiber re-enters runtime teardown and can fault while the fiber machinery is
 // still active.  A window close is an intentional successful exit, so end the
 // process directly and do not run the crash/atexit paths.
+namespace SdCard { void Shutdown(); }  // hle/storage/sd_card.h
+
 [[noreturn]] inline void ExitForAuroraWindowClose() noexcept {
     settings_overlay::ReleaseControllers();
     WindowPlacementPersistence::Flush(true);
+    // What the game saved on the SD card (a mod's settings, replays) goes back into UserData/SD: the atexit handler
+    // that does it never runs on this path.
+    SdCard::Shutdown();
 #if defined(_WIN32)
     // Not ExitProcess: the engine is a DLL (engine_usa/engine_pal), and ExitProcess runs its static destructors after
     // the other threads are gone; a still-joinable std::thread then calls std::terminate and the fatal popup hangs
-    // the close (issue #38). Nothing is left to save here.
+    // the close (issue #38).
     std::fflush(nullptr);
     ::TerminateProcess(::GetCurrentProcess(), 0);
     std::_Exit(EXIT_SUCCESS);

@@ -536,6 +536,11 @@ void build_index() noexcept {
   // named "disabled"). The user's own folder is indexed first and try_emplace keeps the first entry, so
   // it wins over mods; among mods the alphabetically later one wins, like their disc file overrides.
   std::vector<std::filesystem::path> roots{s_replacementRoot};
+  // Dolphin's own layout (<user>/Load/Textures/<game id>), so a Dolphin HD pack's Load folder can be copied in as is.
+  if (std::filesystem::is_directory(userPath / "Load" / "Textures", ec)) {
+    roots.push_back(userPath / "Load" / "Textures");
+  }
+  ec.clear();
   std::vector<std::filesystem::path> mods;
   for (const auto& entry : std::filesystem::directory_iterator(userPath / "mods", ec)) {
     if (entry.is_directory(ec) && !std::filesystem::exists(entry.path() / "disabled", ec) &&

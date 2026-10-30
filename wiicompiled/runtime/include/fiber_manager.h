@@ -99,6 +99,9 @@ public:
     // a watchdog can call it while guest code holds the fiber mutex without deadlocking.
     static void DumpGuestThreads(std::ostream& os);
     static bool IsTerminated(uint32_t guestThreadAddr);
+    // Save states (save_states.cpp): the fibers' bookkeeping, copied out and put back.
+    static std::vector<std::pair<uint32_t, GuestFiber>> CopyFibers(uint32_t& currentGuestThread);
+    static void RestoreFibers(const std::vector<std::pair<uint32_t, GuestFiber>>& fibers, uint32_t currentGuestThread);
 
 private:
     // The fiber entry point wrapper

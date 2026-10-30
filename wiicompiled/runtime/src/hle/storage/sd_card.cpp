@@ -4,6 +4,10 @@
 // FatFs whenever the folder changed since the last build (a manifest of sizes and times decides), and files the
 // game created or changed on the card are copied back into the folder at shutdown. Without that folder a
 // Dolphin-style UserData/sd.raw image is used directly.
+//
+// The image holds only the card's structure (FAT, folders): each folder file gets a contiguous run of clusters
+// that is left unwritten (a sparse file) and read from the folder file itself (sd_card.raw.extents lists them), so
+// a mod's gigabytes are not stored twice. A run the game writes into is copied into the image first.
 
 #include "sd_card.h"
 
@@ -19,6 +23,7 @@ extern "C" {
 
 #include <sys/stat.h>
 #ifdef _WIN32
+#include <io.h>
 #include <sys/utime.h>
 #else
 #include <utime.h>
@@ -91,6 +96,159 @@ std::string Utf8(const fs::path& path) {
 
 fs::path FromUtf8(const std::string& text) {
     return fs::path(std::u8string(text.begin(), text.end()));
+}
+
+// Card bytes that are a folder file's contents, by card offset (the folder file's relative path and length).
+struct Extent {
+    uint64_t length = 0;
+    std::string path;
+};
+std::map<uint64_t, Extent> g_extents;
+std::map<std::string, FILE*> g_hostFiles;  // open folder files behind extents
+
+fs::path ExtentsPath() { return fs::path(g_imagePath).concat(".extents"); }
+
+bool ReadExtents() {
+    g_extents.clear();
+    std::ifstream in(ExtentsPath(), std::ios::binary);
+    if (!in) return false;
+    for (std::string line; std::getline(in, line);) {
+        std::istringstream fields(line);
+        uint64_t offset = 0;
+        Extent extent;
+        if (fields >> offset >> extent.length && std::getline(fields >> std::ws, extent.path)) g_extents[offset] = extent;
+    }
+    return true;
+}
+
+// Written aside and renamed over, like the manifest.
+void WriteExtents() {
+    const fs::path temp = fs::path(ExtentsPath()).concat(".new");
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        for (const auto& [offset, extent] : g_extents) out << offset << ' ' << extent.length << ' ' << extent.path << '\n';
+        if (!out) return;
+    }
+    std::error_code ec;
+    fs::rename(temp, ExtentsPath(), ec);
+}
+
+void CloseHostFiles() {
+    for (auto& [path, file] : g_hostFiles) std::fclose(file);
+    g_hostFiles.clear();
+}
+
+FILE* HostFile(const std::string& path) {
+    if (auto it = g_hostFiles.find(path); it != g_hostFiles.end()) return it->second;
+    if (g_hostFiles.size() >= 64) CloseHostFiles();
+    FILE* file = OpenFile(g_folder / FromUtf8(path), "rb");
+    if (file) g_hostFiles[path] = file;
+    return file;
+}
+
+// The first extent that may overlap `offset` onwards.
+std::map<uint64_t, Extent>::iterator FirstExtentFrom(uint64_t offset) {
+    auto it = g_extents.upper_bound(offset);
+    if (it != g_extents.begin()) {
+        auto previous = std::prev(it);
+        if (previous->first + previous->second.length > offset) return previous;
+    }
+    return it;
+}
+
+// Card reads: extents from their folder files, the rest from the image.
+bool ReadCard(FILE* image, uint64_t offset, void* destination, uint64_t length) {
+    auto* out = static_cast<uint8_t*>(destination);
+    while (length > 0) {
+        auto it = FirstExtentFrom(offset);
+        uint64_t chunk = length;
+        if (it != g_extents.end() && it->first <= offset) {
+            chunk = std::min(chunk, it->first + it->second.length - offset);
+            FILE* host = HostFile(it->second.path);
+            if (!host || !SeekTo(host, offset - it->first) || std::fread(out, 1, chunk, host) != chunk) {
+                RT_LOGF(RT_TAG_NAND, "[sd] reading '%s' for the card failed\n", it->second.path.c_str());
+                return false;
+            }
+        } else {
+            if (it != g_extents.end()) chunk = std::min(chunk, it->first - offset);
+            if (!SeekTo(image, offset) || std::fread(out, 1, chunk, image) != chunk) return false;
+        }
+        out += chunk;
+        offset += chunk;
+        length -= chunk;
+    }
+    return true;
+}
+
+// Before the game (or FatFs) writes into extents: their folder files' bytes go into the image, which holds them
+// from then on.
+bool DetachExtents(FILE* image, uint64_t offset, uint64_t length) {
+    bool changed = false;
+    std::vector<char> buffer(kMiB);
+    for (auto it = FirstExtentFrom(offset); it != g_extents.end() && it->first < offset + length;) {
+        FILE* host = HostFile(it->second.path);
+        for (uint64_t done = 0; done < it->second.length;) {
+            const size_t chunk = static_cast<size_t>(std::min<uint64_t>(buffer.size(), it->second.length - done));
+            if (!host || !SeekTo(host, done) || std::fread(buffer.data(), 1, chunk, host) != chunk ||
+                !SeekTo(image, it->first + done) || std::fwrite(buffer.data(), 1, chunk, image) != chunk) {
+                return false;
+            }
+            done += chunk;
+        }
+        it = g_extents.erase(it);
+        changed = true;
+    }
+    if (changed) WriteExtents();
+    return true;
+}
+
+bool WriteCard(FILE* image, uint64_t offset, const void* source, uint64_t length) {
+    return DetachExtents(image, offset, length) && SeekTo(image, offset) &&
+           std::fwrite(source, 1, length, image) == length;
+}
+
+void ForgetExtents(const std::string& path) {
+    for (auto it = g_extents.begin(); it != g_extents.end();) it = it->second.path == path ? g_extents.erase(it) : std::next(it);
+    if (auto open = g_hostFiles.find(path); open != g_hostFiles.end()) {
+        std::fclose(open->second);
+        g_hostFiles.erase(open);
+    }
+}
+
+// The image's unwritten runs take no disk space (NTFS needs to be told; Linux file systems do it anyway).
+void MakeSparse(FILE* file) {
+#ifdef _WIN32
+    constexpr DWORD kFsctlSetSparse = 0x000900C4;
+    DWORD returned = 0;
+    DeviceIoControl(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(file))), kFsctlSetSparse, nullptr, 0, nullptr, 0,
+                    &returned, nullptr);
+#else
+    (void)file;
+#endif
+}
+
+// A new file's contents on the card: a contiguous run read from the folder file, or (no contiguous room left)
+// copied into the image.
+bool FillFile(FIL& file, const std::string& path, uint64_t size) {
+    if (size == 0) return true;
+    if (f_expand(&file, static_cast<FSIZE_t>(size), 1) == FR_OK) {
+        const FATFS* volume = file.obj.fs;
+        const uint64_t sector = volume->database + static_cast<uint64_t>(file.obj.sclust - 2) * volume->csize;
+        g_extents[sector * kSector] = {size, path};
+        ReportProgress(size);
+        return true;
+    }
+    FILE* source = OpenFile(g_folder / FromUtf8(path), "rb");
+    if (!source) return false;
+    bool ok = true;
+    std::vector<char> buffer(4 * kMiB);
+    for (size_t got; ok && (got = std::fread(buffer.data(), 1, buffer.size(), source)) > 0;) {
+        UINT written = 0;
+        ok = f_write(&file, buffer.data(), static_cast<UINT>(got), &written) == FR_OK && written == got;
+        ReportProgress(got);
+    }
+    std::fclose(source);
+    return ok;
 }
 
 // FAT timestamps are local time with 2-second resolution.
@@ -168,7 +326,7 @@ Manifest ScanFolder(const fs::path& folder) {
 }
 
 // Renamed whenever the image layout changes, so an older cached image is rebuilt.
-fs::path ManifestPath() { return fs::path(g_imagePath).concat(".fat32.manifest"); }
+fs::path ManifestPath() { return fs::path(g_imagePath).concat(".fat32b.manifest"); }
 
 Manifest ReadManifest() {
     Manifest manifest;
@@ -221,6 +379,9 @@ bool BuildImage(const Manifest& manifest) {
     const fs::path temp = fs::path(g_imagePath).concat(".building");
     FILE* disk = OpenFile(temp, "w+b");
     if (!disk) return false;
+    MakeSparse(disk);
+    g_extents.clear();
+    CloseHostFiles();
     // Size the image without writing every byte.
     if (!SeekTo(disk, size - 1) || std::fputc(0, disk) == EOF) {
         std::fclose(disk);
@@ -244,7 +405,6 @@ bool BuildImage(const Manifest& manifest) {
         ok = false;
     }
 
-    std::vector<char> buffer(4 * kMiB);
     g_progressDone = 0;
     g_progressTotal = content;
     for (auto it = manifest.begin(); ok && it != manifest.end(); ++it) {
@@ -258,20 +418,12 @@ bool BuildImage(const Manifest& manifest) {
             }
             continue;
         }
-        FILE* source = OpenFile(g_folder / FromUtf8(path), "rb");
         FIL file;
-        if (!source || f_open(&file, target.c_str(), FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
-            RT_LOGF(RT_TAG_NAND, "[sd] copying '%s' into the image failed\n", path.c_str());
-            if (source) std::fclose(source);
+        if (f_open(&file, target.c_str(), FA_WRITE | FA_CREATE_ALWAYS) != FR_OK || !FillFile(file, path, entry.size)) {
+            RT_LOGF(RT_TAG_NAND, "[sd] putting '%s' on the card failed\n", path.c_str());
             ok = false;
             break;
         }
-        for (size_t got; ok && (got = std::fread(buffer.data(), 1, buffer.size(), source)) > 0;) {
-            UINT written = 0;
-            ok = f_write(&file, buffer.data(), static_cast<UINT>(got), &written) == FR_OK && written == got;
-            ReportProgress(got);
-        }
-        std::fclose(source);
         ok = f_close(&file) == FR_OK && ok;
         FILINFO info{};
         info.fdate = static_cast<WORD>(entry.fatTime >> 16);
@@ -292,6 +444,7 @@ bool BuildImage(const Manifest& manifest) {
         fs::rename(temp, g_imagePath, ec);
     }
     if (ec) return false;
+    WriteExtents();
     WriteManifest(manifest);
     RT_LOGF(RT_TAG_NAND, "[sd] SD card image built in %.1f s (%zu entries)\n",
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), manifest.size());
@@ -305,20 +458,10 @@ bool PutFile(const std::string& path, const Entry& entry) {
         const FRESULT fr = f_mkdir(target.c_str());
         return fr == FR_OK || fr == FR_EXIST;
     }
-    FILE* source = OpenFile(g_folder / FromUtf8(path), "rb");
+    ForgetExtents(path);  // its old clusters are freed
     FIL file;
-    if (!source || f_open(&file, target.c_str(), FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) {
-        if (source) std::fclose(source);
-        return false;
-    }
-    bool ok = true;
-    std::vector<char> buffer(4 * kMiB);
-    for (size_t got; ok && (got = std::fread(buffer.data(), 1, buffer.size(), source)) > 0;) {
-        UINT written = 0;
-        ok = f_write(&file, buffer.data(), static_cast<UINT>(got), &written) == FR_OK && written == got;
-        ReportProgress(got);
-    }
-    std::fclose(source);
+    if (f_open(&file, target.c_str(), FA_WRITE | FA_CREATE_ALWAYS) != FR_OK) return false;
+    bool ok = FillFile(file, path, entry.size);
     ok = f_close(&file) == FR_OK && ok;
     FILINFO info{};
     info.fdate = static_cast<WORD>(entry.fatTime >> 16);
@@ -364,7 +507,10 @@ bool UpdateImage(const Manifest& built, const Manifest& current) {
         const bool da = built.at(a).size == kDirectory, db = built.at(b).size == kDirectory;
         return da != db ? !da : a.size() > b.size();
     });
-    for (auto it = gone.begin(); ok && it != gone.end(); ++it) ok = f_unlink(VolumePath(*it).c_str()) == FR_OK;
+    for (auto it = gone.begin(); ok && it != gone.end(); ++it) {
+        ForgetExtents(*it);
+        ok = f_unlink(VolumePath(*it).c_str()) == FR_OK;
+    }
     for (auto it = put.begin(); ok && it != put.end(); ++it) ok = PutFile(it->first, it->second);
     f_mount(nullptr, "", 0);
     std::fclose(disk);
@@ -373,6 +519,7 @@ bool UpdateImage(const Manifest& built, const Manifest& current) {
         RT_LOGF(RT_TAG_NAND, "[sd] the card could not be updated in place: building it again\n");
         return false;
     }
+    WriteExtents();
     WriteManifest(current);
     RT_LOGF(RT_TAG_NAND, "[sd] card updated: %zu file(s) written, %zu removed\n", put.size(), gone.size());
     return true;
@@ -429,16 +576,21 @@ bool OpenLocked() {
     if (fs::is_directory(userData / "SD", ec)) {
         g_folder = userData / "SD";
         g_imagePath = userData / "Cache" / "sd_card.raw";
+        fs::remove(fs::path(g_imagePath).concat(".fat32.manifest"), ec);  // a full-copy card from before 0.5.1: rebuilt
         const Manifest current = ScanFolder(g_folder);
         const Manifest built = ReadManifest();
-        if (!fs::exists(g_imagePath, ec) || built != current) {
+        const bool haveExtents = ReadExtents();
+        if (!fs::exists(g_imagePath, ec) || built != current || !haveExtents) {
             const auto [now, then] = std::mismatch(current.begin(), current.end(), built.begin(), built.end());
             const std::string& changed = now != current.end() ? now->first : then != built.end() ? then->first : "";
             RT_LOGF(RT_TAG_NAND, "[sd] '%s' changed since the card was built%s%s\n", Utf8(g_folder).c_str(),
                     changed.empty() ? "" : ": ", changed.c_str());
             // A few files changed (the game's own writes copied back, a mod's update): change them on the card rather
             // than build the whole card again.
-            if (!(fs::exists(g_imagePath, ec) && !built.empty() && UpdateImage(built, current)) && !BuildImage(current)) return false;
+            if (!(fs::exists(g_imagePath, ec) && !built.empty() && haveExtents && UpdateImage(built, current)) &&
+                !BuildImage(current)) {
+                return false;
+            }
         }
     } else if (fs::exists(userData / "sd.raw", ec)) {
         g_imagePath = userData / "sd.raw";
@@ -462,13 +614,13 @@ extern "C" DSTATUS disk_status(BYTE) { return g_fatfsDisk ? 0 : STA_NOINIT; }
 extern "C" DSTATUS disk_initialize(BYTE) { return g_fatfsDisk ? 0 : STA_NOINIT; }
 
 extern "C" DRESULT disk_read(BYTE, BYTE* buffer, LBA_t sector, UINT count) {
-    if (!g_fatfsDisk || !SeekTo(g_fatfsDisk, static_cast<uint64_t>(sector) * kSector)) return RES_ERROR;
-    return std::fread(buffer, kSector, count, g_fatfsDisk) == count ? RES_OK : RES_ERROR;
+    return g_fatfsDisk && ReadCard(g_fatfsDisk, static_cast<uint64_t>(sector) * kSector, buffer, count * kSector)
+               ? RES_OK : RES_ERROR;
 }
 
 extern "C" DRESULT disk_write(BYTE, const BYTE* buffer, LBA_t sector, UINT count) {
-    if (!g_fatfsDisk || !SeekTo(g_fatfsDisk, static_cast<uint64_t>(sector) * kSector)) return RES_ERROR;
-    return std::fwrite(buffer, kSector, count, g_fatfsDisk) == count ? RES_OK : RES_ERROR;
+    return g_fatfsDisk && WriteCard(g_fatfsDisk, static_cast<uint64_t>(sector) * kSector, buffer, count * kSector)
+               ? RES_OK : RES_ERROR;
 }
 
 extern "C" DRESULT disk_ioctl(BYTE, BYTE command, void* buffer) {
@@ -504,14 +656,12 @@ uint64_t SizeBytes() {
 
 bool Read(uint64_t offset, void* destination, size_t length) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!OpenLocked() || offset + length > g_size || !SeekTo(g_image, offset)) return false;
-    return std::fread(destination, 1, length, g_image) == length;
+    return OpenLocked() && offset + length <= g_size && ReadCard(g_image, offset, destination, length);
 }
 
 bool Write(uint64_t offset, const void* source, size_t length) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!OpenLocked() || offset + length > g_size || !SeekTo(g_image, offset)) return false;
-    return std::fwrite(source, 1, length, g_image) == length;
+    return OpenLocked() && offset + length <= g_size && WriteCard(g_image, offset, source, length);
 }
 
 void Shutdown() {
@@ -531,6 +681,7 @@ void Shutdown() {
     }
     std::fclose(g_fatfsDisk);
     g_fatfsDisk = nullptr;
+    CloseHostFiles();
     // The folder now matches the card, so the next start reuses this image instead of rebuilding it.
     WriteManifest(ScanFolder(g_folder));
     if (copied) RT_LOGF(RT_TAG_NAND, "[sd] copied %d file(s) the game wrote back to '%s'\n", copied, Utf8(g_folder).c_str());

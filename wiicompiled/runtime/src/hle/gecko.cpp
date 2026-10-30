@@ -6,10 +6,16 @@
 //
 // The codes are the first <folder>/RSBE01.GCT on the virtual SD card (UserData/SD/<folder>, Project+'s layout:
 // sd:/Project+/RSBE01.GCT and gc.txt), else UserData/Codes/RSBE01.gct with an optional gc.txt beside it.
+//
+// Cheats come after them in the same list: UserData/Cheats/RSBE01.ini in Dolphin's format ([Gecko] holds "$Name" lines
+// each followed by its "XXXXXXXX YYYYYYYY" code lines, [Gecko_Enabled] the names switched on), so a Dolphin cheat file
+// works as it is. The options menu switches them while the game runs: the list is rewritten and the handler picks it
+// up on its next frame. Never in online play (every player must run the same game).
 
 #include "gecko.h"
 
 #include "abi_bridge.h"
+#include "det_clock.h"
 #include "guest_code_patch.h"
 #include "memory.h"
 #include "runtime_config.h"
@@ -152,6 +158,129 @@ GameConfig ReadGameConfig(const fs::path& path) {
     return config;
 }
 
+// The installed list: where it lives, and the mods' codes (header included, terminator dropped) that come first.
+uint32_t g_listStart = 0, g_listEnd = 0;
+std::vector<uint8_t> g_modCodes;
+std::vector<Gecko::Cheat> g_cheats;
+std::vector<std::string> g_cheatFileLines;  // the file as read, minus [Gecko_Enabled], written back with it
+std::string g_cheatProblem;
+
+fs::path CheatFilePath() { return RuntimeConfigFile::ApplicationDataDirectory() / "Cheats" / "RSBE01.ini"; }
+
+bool ParseCodeLine(const std::string& line, uint32_t& hi, uint32_t& lo) {
+    if (line.size() < 17 || line[8] != ' ') return false;
+    for (size_t i : {size_t{0}, size_t{9}}) {
+        for (size_t j = i; j < i + 8; ++j) if (!std::isxdigit(static_cast<unsigned char>(line[j]))) return false;
+    }
+    hi = static_cast<uint32_t>(std::stoul(line.substr(0, 8), nullptr, 16));
+    lo = static_cast<uint32_t>(std::stoul(line.substr(9, 8), nullptr, 16));
+    return true;
+}
+
+// One cheat file: its lines minus [Gecko_Enabled], its cheats with the lines each one spans, the names switched on.
+struct CheatFile {
+    std::vector<std::string> lines;
+    std::vector<Gecko::Cheat> cheats;
+    std::vector<std::pair<size_t, size_t>> spans;
+    std::vector<std::string> enabled;
+};
+
+CheatFile ReadCheatFile(const fs::path& path) {
+    CheatFile file;
+    std::ifstream in(path);
+    std::string section;
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::string t = line;
+        t.erase(0, std::min(t.size(), t.find_first_not_of(" \t")));
+        if (!t.empty() && t[0] == '[') section = Lower(t.substr(0, t.find(']') + 1));
+        if (section == "[gecko_enabled]") {
+            if (!t.empty() && t[0] == '$') file.enabled.push_back(t.substr(1));
+            continue;
+        }
+        file.lines.push_back(line);
+        if (section != "[gecko]" || t.empty() || t[0] == '[') continue;
+        if (t[0] == '$') {
+            file.cheats.push_back({t.substr(1), {}, {}, false, true});
+            file.spans.push_back({file.lines.size() - 1, file.lines.size()});
+            continue;
+        }
+        if (file.cheats.empty()) continue;
+        file.spans.back().second = file.lines.size();
+        Gecko::Cheat& cheat = file.cheats.back();
+        if (t[0] == '*') {
+            cheat.notes += (cheat.notes.empty() ? "" : " ") + t.substr(1);
+        } else {
+            uint32_t hi = 0, lo = 0;
+            if (ParseCodeLine(t, hi, lo)) {
+                cheat.words.push_back(hi);
+                cheat.words.push_back(lo);
+            } else {
+                cheat.usable = false;  // Dolphin's "XXXXXXXX" placeholders: values to fill in first
+            }
+        }
+    }
+    for (auto& cheat : file.cheats) {
+        cheat.usable = cheat.usable && !cheat.words.empty();
+        cheat.enabled = cheat.usable && std::find(file.enabled.begin(), file.enabled.end(), cheat.name) != file.enabled.end();
+    }
+    return file;
+}
+
+void SaveCheats();
+
+void LoadCheats() {
+    CheatFile mine = ReadCheatFile(CheatFilePath());
+    // The list shipped beside the game (engine/default-cheats.ini): codes the player's file doesn't have yet are added
+    // to it, all off, on the first start and after an update that brings new ones.
+    const CheatFile shipped = ReadCheatFile(CheatFilePath().parent_path().parent_path().parent_path() / "default-cheats.ini");
+    bool added = false;
+    for (size_t i = 0; i < shipped.cheats.size(); ++i) {
+        const auto have = [&](const Gecko::Cheat& c) { return c.name == shipped.cheats[i].name; };
+        if (std::any_of(mine.cheats.begin(), mine.cheats.end(), have)) continue;
+        if (!added) mine.lines.push_back("[Gecko]");
+        added = true;
+        mine.lines.insert(mine.lines.end(), shipped.lines.begin() + static_cast<std::ptrdiff_t>(shipped.spans[i].first),
+                          shipped.lines.begin() + static_cast<std::ptrdiff_t>(shipped.spans[i].second));
+    }
+    g_cheatFileLines = std::move(mine.lines);
+    g_cheats = std::move(mine.cheats);
+    if (added) {
+        SaveCheats();
+        const CheatFile merged = ReadCheatFile(CheatFilePath());
+        g_cheatFileLines = merged.lines;
+        g_cheats = merged.cheats;
+    }
+}
+
+void SaveCheats() {
+    std::error_code ec;
+    fs::create_directories(CheatFilePath().parent_path(), ec);
+    std::ofstream out(CheatFilePath(), std::ios::binary | std::ios::trunc);
+    for (const auto& line : g_cheatFileLines) out << line << "\n";
+    out << "[Gecko_Enabled]\n";
+    for (const auto& cheat : g_cheats) if (cheat.enabled) out << "$" << cheat.name << "\n";
+}
+
+// The mods' codes then the switched-on cheats, ended; false when they do not fit (the cheats are left out then).
+bool WriteCodeList() {
+    std::vector<uint8_t> list = g_modCodes;
+    auto push = [&](uint32_t w) { for (int sh = 24; sh >= 0; sh -= 8) list.push_back(static_cast<uint8_t>(w >> sh)); };
+    for (const auto& cheat : g_cheats) if (cheat.enabled) for (uint32_t w : cheat.words) push(w);
+    push(0xF0000000u);
+    push(0);
+    g_cheatProblem.clear();
+    if (list.size() > g_listEnd - g_listStart) {
+        g_cheatProblem = "Too many cheats on at once: they don't fit in the code list. Switch some off.";
+        RT_LOGF(RT_TAG_MOD, "[gecko] %zu bytes of codes and cheats do not fit 0x%08X..0x%08X\n", list.size(), g_listStart, g_listEnd);
+        list.resize(g_modCodes.size());
+        push(0xF0000000u);
+        push(0);
+    }
+    std::memcpy(Memory::GetPointer(g_listStart, list.size()), list.data(), list.size());
+    return g_cheatProblem.empty();
+}
+
 } // namespace
 
 void BrawlModulesRecordBootPatches();  // hle/brawl_modules.cpp
@@ -178,29 +307,40 @@ std::string BuildIdentity() {
 }
 
 void Install() {
-    const auto codesPath = FindCodes();
-    if (!codesPath) return;
-    std::ifstream in(*codesPath, std::ios::binary);
-    const std::vector<uint8_t> codes((std::istreambuf_iterator<char>(in)), {});
     static constexpr uint8_t kMagic[8] = {0x00, 0xD0, 0xC0, 0xDE, 0x00, 0xD0, 0xC0, 0xDE};
-    if (codes.size() < 16 || std::memcmp(codes.data(), kMagic, 8) != 0) {
-        RT_LOGF(RT_TAG_MOD, "[gecko] '%s' is not a Gecko code list\n", reinterpret_cast<const char*>(codesPath->u8string().c_str()));
-        return;
-    }
+    // Online play runs every player's game in step: no cheats there.
+    if (!DetClock::Enabled()) LoadCheats();
+    const auto codesPath = FindCodes();
+    std::vector<uint8_t> codes(kMagic, kMagic + 8);
     GameConfig config;
-    if (const auto gameConfig = FindFile(codesPath->parent_path(), "gc.txt")) config = ReadGameConfig(*gameConfig);
-    if (codes.size() > config.codeListEnd - config.codeListStart || !Memory::Contains(config.codeListStart, codes.size())) {
-        RT_LOGF(RT_TAG_MOD, "[gecko] %zu bytes of codes do not fit 0x%08X..0x%08X\n", codes.size(), config.codeListStart,
-                config.codeListEnd);
-        return;
+    if (codesPath) {
+        std::ifstream in(*codesPath, std::ios::binary);
+        codes.assign(std::istreambuf_iterator<char>(in), {});
+        if (codes.size() < 16 || std::memcmp(codes.data(), kMagic, 8) != 0) {
+            RT_LOGF(RT_TAG_MOD, "[gecko] '%s' is not a Gecko code list\n", reinterpret_cast<const char*>(codesPath->u8string().c_str()));
+            return;
+        }
+        if (const auto gameConfig = FindFile(codesPath->parent_path(), "gc.txt")) config = ReadGameConfig(*gameConfig);
+        if (codes.size() > config.codeListEnd - config.codeListStart || !Memory::Contains(config.codeListStart, codes.size())) {
+            RT_LOGF(RT_TAG_MOD, "[gecko] %zu bytes of codes do not fit 0x%08X..0x%08X\n", codes.size(), config.codeListStart,
+                    config.codeListEnd);
+            return;
+        }
+        static constexpr uint8_t kEnd[8] = {0xF0, 0, 0, 0, 0, 0, 0, 0};
+        if (codes.size() >= 24 && std::memcmp(codes.data() + codes.size() - 8, kEnd, 8) == 0) codes.resize(codes.size() - 8);
+    } else if (g_cheats.empty()) {
+        return;  // no mod and no cheat file: the game as it is
     }
+    g_listStart = config.codeListStart;
+    g_listEnd = config.codeListEnd;
+    g_modCodes = codes;
 
     // Guard main.dol's code first, so the pokes and the hook below are seen as the code patches they are.
     GuestCodePatch::Protect(0x80004000u, 0x800064E0u, "main.dol .init");
     GuestCodePatch::Protect(0x8000C860u, 0x804064E0u, "main.dol .text");
 
     Memory::Write32(kCodeListSlot, config.codeListStart);
-    std::memcpy(Memory::GetPointer(config.codeListStart, codes.size()), codes.data(), codes.size());
+    WriteCodeList();
     for (const Poke& poke : config.pokes) {
         if (!poke.ifAddress || Memory::Read32(*poke.ifAddress) == *poke.ifValue) Memory::Write32(poke.address, poke.value);
     }
@@ -211,8 +351,9 @@ void Install() {
              Memory::Write32(kVbiHookSite, BranchTo(kVbiHookSite, kHandlerEntry));
     }
     GuestCodePatch::Sync();
-    RT_LOGF(RT_TAG_MOD, "[gecko] %zu code lines from '%s' at 0x%08X, hooktype %d, %zu poke(s)\n", codes.size() / 8 - 2,
-            reinterpret_cast<const char*>(codesPath->u8string().c_str()), config.codeListStart, config.hookType, config.pokes.size());
+    RT_LOGF(RT_TAG_MOD, "[gecko] %zu code lines from '%s' at 0x%08X, hooktype %d, %zu poke(s), %zu cheat(s)\n", codes.size() / 8 - 1,
+            codesPath ? reinterpret_cast<const char*>(codesPath->u8string().c_str()) : "(cheats only)", config.codeListStart,
+            config.hookType, config.pokes.size(), g_cheats.size());
     // The loaders (Gecko OS, Project+'s, REX's) run the handler once before the game's first instruction, so every
     // hook is in place from the start: REX creates its Syriinge heap from a hook inside the heap set-up loop, which
     // the first hooked frame comes too late for.
@@ -222,6 +363,23 @@ void Install() {
     GuestCodePatch::Sync();
     BrawlModulesRecordBootPatches();
 }
+
+std::vector<Cheat>& Cheats() { return g_cheats; }
+
+bool ModCodesInstalled() { return g_modCodes.size() > 8; }  // more than the header
+
+bool CheatsAvailable() { return g_listStart != 0 && !DetClock::Enabled(); }
+
+bool SetCheatEnabled(size_t index, bool enabled) {
+    if (index >= g_cheats.size() || !CheatsAvailable() || !g_cheats[index].usable) return false;
+    g_cheats[index].enabled = enabled;
+    SaveCheats();
+    return WriteCodeList();
+}
+
+const std::string& CheatProblem() { return g_cheatProblem; }
+
+std::string CheatFile() { return reinterpret_cast<const char*>(CheatFilePath().u8string().c_str()); }
 
 void RunVbiHook(CpuContext* ctx) {
     if (Memory::Read32(kVbiHookSite) != BranchTo(kVbiHookSite, kHandlerEntry)) return;

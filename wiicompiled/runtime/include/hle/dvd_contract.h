@@ -212,7 +212,10 @@ inline Image BuildImage(const std::vector<RegisteredFile>& registrations) {
     }
 
     const size_t entriesSize = image.entries.size() * 12u;
-    std::vector<uint8_t> stringTable(1, 0);
+    // The disc's name table starts with the first entry's name: the root has none (its offset 0 is never read).
+    // Mods find names at fixed addresses in it (Project+'s music engine takes "strm" and ".brstm" from the FST), so
+    // a leading empty name moved every string by a byte and broke their custom music.
+    std::vector<uint8_t> stringTable;
     std::vector<uint32_t> nameOffsets(image.entries.size(), 0);
     for (size_t i = 1; i < names.size(); ++i) {
         if (stringTable.size() > 0x00FFFFFFu) {
@@ -220,6 +223,9 @@ inline Image BuildImage(const std::vector<RegisteredFile>& registrations) {
         }
         nameOffsets[i] = static_cast<uint32_t>(stringTable.size());
         stringTable.insert(stringTable.end(), names[i].begin(), names[i].end());
+        stringTable.push_back(0);
+    }
+    if (stringTable.empty()) {
         stringTable.push_back(0);
     }
 

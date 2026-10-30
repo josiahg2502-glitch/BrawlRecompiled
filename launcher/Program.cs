@@ -53,7 +53,12 @@ static class Program
         ApplicationConfiguration.Initialize();
         // "--screenshot <dir>" draws every page to <dir>\<page>.png and exits (visual check without the desktop).
         int shot = Array.IndexOf(args, "--screenshot");
-        Application.Run(new MainForm(selfTest: args.Contains("--selftest"), screenshotDir: shot >= 0 && shot + 1 < args.Length ? args[shot + 1] : null));
+        bool selfTest = args.Contains("--selftest"), update = args.Contains("--update");
+        var form = new MainForm(selfTest, shot >= 0 && shot + 1 < args.Length ? args[shot + 1] : null, update);
+        // Normally no window: the game starts, and its settings are in its own options menu. This window shows for the
+        // first start (choosing the disc), an update (--update, from the game) or --settings.
+        if (!selfTest && shot < 0 && !update && !args.Contains("--settings") && form.TryStartGame()) return 0;
+        Application.Run(form);
         return 0;
     }
 }

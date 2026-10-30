@@ -1,4 +1,6 @@
 #include <set>
+#include <tuple>
+#include <set>
 #include <cstdio>
 #include <absl/container/flat_hash_set.h>
 #include <array>
@@ -500,7 +502,9 @@ static void apply_xf_projection() {
     // height can't tell: SPM zooms its 2D camera in by shrinking it, which then went unwidened and stretched.
     const auto& vp = g_gxState.xfViewport;
     const bool screenSized = vp[0] * 2.0f >= 600.0f && -vp[1] * 2.0f >= 440.0f;
-    if (aspect > 1.68f && aspect < 1.88f && screenSized) {
+    // Brawl: the character and stage selects use a 1.65 camera (their layouts for 16:9), so the range starts there;
+    // below it they stretched across an ultrawide screen.
+    if (aspect > 1.62f && aspect < 1.88f && screenSized) {
       widen = aspect / wide;
       g_spmScreenWiden = widen;
     }
@@ -508,6 +512,20 @@ static void apply_xf_projection() {
     g_spmScreenWiden = 1.0f;
   }
   g_spmProjWiden = widen;
+  {
+    // BRAWL_LOG_PROJ: each distinct projection shape once (type, aspect, viewport, widened or not).
+    static const bool logProj = std::getenv("BRAWL_LOG_PROJ") != nullptr;
+    if (logProj && raw[0] != 0.0f) {
+      static std::set<std::tuple<int, int, int, int, int>> seen;
+      const auto& vp = g_gxState.xfViewport;
+      const auto key = std::make_tuple(int(g_gxState.projType), int(raw[2] / raw[0] * 100.0f), int(vp[0] * 2.0f),
+                                       int(-vp[1] * 2.0f), int(raw[1] * 1000.0f));
+      if (seen.insert(key).second) {
+        std::fprintf(stderr, "[proj] type %d aspect %.3f vp %.0fx%.0f off %.3f widen %.3f\n", int(g_gxState.projType),
+                     raw[2] / raw[0], vp[0] * 2.0f, -vp[1] * 2.0f, raw[1], widen);
+      }
+    }
+  }
   proj.m0[0] = raw[0] * widen;
   proj.m1[1] = raw[2];
   proj.m2[2] = raw[4];

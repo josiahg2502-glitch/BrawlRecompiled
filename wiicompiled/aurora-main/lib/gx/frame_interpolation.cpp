@@ -751,6 +751,10 @@ void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
   s_diagLateSealDrops.store(0, std::memory_order_relaxed);
 }
 
+// Brawl: set while the game changes scene (loading, fades): its long frames are no sign the machine can't keep up,
+// so they drop their own inserted frames but don't count toward lowering the frame rate.
+std::atomic<bool> g_pacingExempt{false};
+
 void report_producer_paced(bool paced) noexcept {
   const uint32_t maximumSamples = maximum_interpolation_samples();
   if (maximumSamples == 0) {
@@ -764,6 +768,11 @@ void report_producer_paced(bool paced) noexcept {
   // Per-frame decision, no streaks: a late frame seals without its inserted slots and
   // the next one is back at full count. See s_dropInterpolationAtSeal.
   s_dropInterpolationAtSeal.store(!paced, std::memory_order_release);
+  if (g_pacingExempt.load(std::memory_order_acquire)) {
+    s_pacingWindowFrames.store(0, std::memory_order_release);
+    s_pacingWindowMisses.store(0, std::memory_order_release);
+    return;
+  }
 
   const uint32_t frames = s_pacingWindowFrames.load(std::memory_order_acquire) + 1;
   const uint32_t misses =

@@ -27,7 +27,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="../GameConfig.cs;../WiiDisc.cs;../WiiSave.cs;../Gamepads.cs;../ModInstall.cs" />
+    <Compile Include="../GameConfig.cs;../WiiDisc.cs;../WiiSave.cs;../Gamepads.cs;../ModInstall.cs;../Updater.cs" />
     <EmbeddedResource Include="../smash.ico" LogicalName="smash.ico" />
     <!-- tools/make_launcher_art.py: fighter portraits, the Smash Ball and the labels in the game's title font -->
     <EmbeddedResource Include="../art/*.png" LogicalName="art.%(Filename)%(Extension)" />

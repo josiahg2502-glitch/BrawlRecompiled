@@ -84,6 +84,8 @@ struct RuntimeUserConfig {
     std::optional<bool> wiiAccelTrace;
     std::optional<bool> networkEnabled;
     std::optional<std::string> sdCodes;
+    std::optional<int64_t> fastForwardSpeed;  // [gameplay] fast_forward_speed: 2-4, F8's speed
+    std::optional<bool> fastMenus;            // [gameplay] fast_menus: menus, loading and saving run fast
     std::optional<std::string> onlineName;
     std::optional<std::string> onlineServer;  // [online] server: the online server's "host[:port]"  // [online] name: this player's name in rooms  // [mods] sd_codes: the SD folder whose codes load; "vanilla" = no mods
     std::optional<bool> discordPresenceEnabled;
@@ -617,6 +619,8 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.wiiAccelTrace = FindConfigValue<bool>(document, "controller", "wii_accel_trace");
     config.networkEnabled = FindConfigValue<bool>(document, "network", "enabled");
     config.sdCodes = FindConfigValue<std::string>(document, "mods", "sd_codes");
+    config.fastForwardSpeed = FindConfigValue<int64_t>(document, "gameplay", "fast_forward_speed");
+    config.fastMenus = FindConfigValue<bool>(document, "gameplay", "fast_menus");
     config.onlineName = FindConfigValue<std::string>(document, "online", "name");
     config.onlineServer = FindConfigValue<std::string>(document, "online", "server");
     config.discordPresenceEnabled = FindConfigValue<bool>(document, "discord", "enabled");
@@ -1009,6 +1013,12 @@ inline int32_t AspectMode(int32_t fallback) {
     return Get().aspectMode.value_or(fallback);
 }
 
+inline bool SetGraphicsApi(const std::string& value) {
+    if (!IsSupportedGraphicsApi(value)) return false;
+    Mutable().graphicsApi = value;
+    return WriteSetting("video", "graphics_api", FormatString(value));
+}
+
 inline int32_t GpuCompat() {
     return Get().gpuCompat.value_or(0);
 }
@@ -1189,6 +1199,21 @@ inline std::string ModsSdCodes() {
     return Get().sdCodes.value_or("");
 }
 
+inline bool SetModsSdCodes(const std::string& value) {
+    Mutable().sdCodes = value;
+    return WriteSetting("mods", "sd_codes", FormatString(value));
+}
+
+inline int FastForwardSpeed() { return static_cast<int>(std::clamp<int64_t>(Get().fastForwardSpeed.value_or(3), 2, 4)); }
+inline bool SetFastForwardSpeed(int value) {
+    Mutable().fastForwardSpeed = value;
+    return WriteSetting("gameplay", "fast_forward_speed", std::to_string(value));
+}
+inline bool FastMenus() { return Get().fastMenus.value_or(true); }
+inline bool SetFastMenus(bool value) {
+    Mutable().fastMenus = value;
+    return WriteSetting("gameplay", "fast_menus", value ? "true" : "false");
+}
 // The launcher's "Vanilla (no mods)": no codes and no SD card, whatever UserData/SD holds.
 inline bool ModsVanilla() {
     return ModsSdCodes() == "vanilla";

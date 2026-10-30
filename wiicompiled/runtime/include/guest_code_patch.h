@@ -34,5 +34,11 @@ void InterpretFromEnvironment();
 // A mod's replacement of a resident module links where the disc's translated functions are registered: every
 // translated function in [start, end) runs the bytes there in the interpreter from now on.
 void InterpretReplacedModule(uint32_t start, uint32_t end, const char* name);
+// A module the game linked in place instead of at its translated home (a mod's, or any loaded on demand while codes
+// are active) is still reached at the home by translated callers (scene tables in sora_scene): every translated
+// function in [homeStart, homeEnd) runs the code at the same offset from `target` in the interpreter, until
+// ClearRedirect(homeStart) (the module linked at its home again).
+void RedirectModule(uint32_t homeStart, uint32_t homeEnd, uint32_t target, const char* name);
+void ClearRedirect(uint32_t homeStart);
 
 } // namespace GuestCodePatch

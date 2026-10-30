@@ -97,6 +97,27 @@ void MeterAudioBlock(const uint8_t* src, uint32_t bytes) {
     }
 }
 
+// WIICOMPILED_AUDIO_DUMP=<file>: the AI output as raw 32 kHz stereo 16-bit little-endian PCM (left, right), for
+// checking what the game plays apart from the host audio device.
+void DumpAudioBlock(const uint8_t* src, uint32_t bytes) {
+    static FILE* file = [] {
+        const char* path = std::getenv("WIICOMPILED_AUDIO_DUMP");
+        return path != nullptr && *path != '\0' ? std::fopen(path, "wb") : nullptr;
+    }();
+    if (file == nullptr) {
+        return;
+    }
+    std::vector<uint8_t> out(bytes & ~3u);
+    for (uint32_t i = 0; i + 3 < bytes; i += 4) {  // frames arrive right, left, big-endian
+        out[i] = src[i + 3];
+        out[i + 1] = src[i + 2];
+        out[i + 2] = src[i + 1];
+        out[i + 3] = src[i];
+    }
+    std::fwrite(out.data(), 1, out.size(), file);
+    std::fflush(file);
+}
+
 bool PushAudioBlock(uint32_t startAddr, uint32_t length) {
     if (startAddr == 0 || length == 0) {
         return false;
@@ -111,6 +132,7 @@ bool PushAudioBlock(uint32_t startAddr, uint32_t length) {
 
     if (src) {
         MeterAudioBlock(src, bytes);
+        DumpAudioBlock(src, bytes);
         return AudioBackend::Instance().PushWiiAiSamplesBE16(src, bytes);
     }
 

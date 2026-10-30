@@ -83,6 +83,10 @@ target_compile_definitions(mkw_runtime_common PRIVATE
 target_link_libraries(mkw_runtime_common PRIVATE
     aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx)
 target_link_libraries(mkw_runtime_common PRIVATE mkw_platform mkw::pugixml mkw::toml11 mkw::cryptopp mkw::mbedtls mkw::fatfs)
+# Save states compress their snapshots with zstd (aurora's pipeline cache brings it in).
+if(TARGET libzstd_static)
+    target_link_libraries(mkw_runtime_common PRIVATE libzstd_static)
+endif()
 if(MKW_PLATFORM_WINDOWS)
     # ole32/uuid: the first-start game folder picker (game_folder.cpp).
     target_link_libraries(mkw_runtime_common PRIVATE shell32 windowsapp ole32 uuid)
@@ -147,6 +151,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
     target_compile_features(mkw_cpu_baseline PRIVATE cxx_std_17)
     set_target_properties(mkw_cpu_baseline PROPERTIES UNITY_BUILD OFF)
     target_compile_options(mkw_cpu_baseline PRIVATE -w)
+    if(MKW_HOST_ISA STREQUAL "v2")
+        target_compile_definitions(mkw_cpu_baseline PRIVATE MKW_HOST_ISA_V2)
+    endif()
 endif()
 
 if(NOT MKW_BASE_COMMON_SHARDS)
@@ -375,8 +382,9 @@ endif()
 # object above checks. AArch64 builds are compiled locally for the host that
 # will run them, so both Linux and Apple Silicon use the compiler's native CPU
 # tuning rather than leaving target-specific performance on the table.
+set(MKW_HOST_ISA "v3" CACHE STRING "x86_64 floor: v3 (AVX2/FMA, the usual build) or v2 (older processors)")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
-    set(MKW_BASELINE_ARCH_FLAG -march=x86-64-v3)
+    set(MKW_BASELINE_ARCH_FLAG -march=x86-64-${MKW_HOST_ISA})
 elseif(MKW_PLATFORM_ANDROID)
     # Cross-compiled, so -mcpu=native would describe the build machine. ARMv8.2-A (LSE atomics,
     # RCpc loads) is the floor of every Android phone since Cortex-A55/A75.

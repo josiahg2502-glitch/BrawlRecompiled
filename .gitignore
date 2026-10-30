@@ -49,3 +49,4 @@ launcher/linux/publish/
 # The matchmaking Worker's local tooling
 /server/worker/node_modules/
 /server/worker/.wrangler/
+/build-logs-v2/

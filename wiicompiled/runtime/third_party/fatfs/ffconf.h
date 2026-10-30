@@ -1,5 +1,5 @@
 /* Brawl Recompiled: FatFs R0.16 configuration for the virtual SD card (hle/storage/sd_card.cpp).
-   Changed from upstream: FF_USE_MKFS 1, FF_USE_CHMOD 1, FF_CODE_PAGE 437, FF_USE_LFN 2, FF_LFN_UNICODE 2 (UTF-8). */
+   Changed from upstream: FF_USE_MKFS 1, FF_USE_CHMOD 1, FF_CODE_PAGE 437, FF_USE_LFN 2, FF_LFN_UNICODE 2 (UTF-8), FF_USE_EXPAND 1. */
 /*---------------------------------------------------------------------------/
 /  Configurations of FatFs Module
 /---------------------------------------------------------------------------*/
@@ -40,7 +40,7 @@
 /* This option switches fast seek feature. (0:Disable or 1:Enable) */
 
 
-#define FF_USE_EXPAND	0
+#define FF_USE_EXPAND	1
 /* This option switches f_expand(). (0:Disable or 1:Enable) */
 
 

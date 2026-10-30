@@ -28,6 +28,7 @@ sealed class MainWindow : Window
 
     readonly bool selfTest;
     readonly string? screenshotDir;
+    readonly bool update;  // --update: the game asked for the new release to be installed
     // play = the folder holding the game programs and their UserData: engine/ in a release.
     readonly string root, play, gameExe, userData, configPath, modsDir, sdDir, discDir;
     static readonly string AppVersion = typeof(MainWindow).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "?";
@@ -40,9 +41,10 @@ sealed class MainWindow : Window
     PaperButton chooseDisc = null!, playButton = null!;
     Func<bool>? cancelPadCapture;  // the Controls page's gamepad capture: Escape ends it
 
-    public MainWindow(bool selfTest, string? screenshotDir = null)
+    public MainWindow(bool selfTest, string? screenshotDir = null, bool update = false)
     {
         this.selfTest = selfTest;
+        this.update = update;
         this.screenshotDir = screenshotDir;
         (root, play, gameExe) = FindGame();
         userData = Path.Combine(play, "UserData");
@@ -131,7 +133,36 @@ sealed class MainWindow : Window
                 // posted: the lifetime cannot shut down while it is still starting
                 Dispatcher.UIThread.Post(() => (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown(code));
             }
+            else if (update) await CheckForUpdate();
         };
+    }
+
+    // #26: the game finds a newer release (its options menu, System) and starts this with --update to install it over
+    // this folder, then the game starts again.
+    async Task CheckForUpdate()
+    {
+        Updater.CleanUp();
+        if (Updater.InstallRoot("brawl-engine") is not { } installRoot || await Updater.CheckAsync(AppVersion, linux: true) is not { } release)
+        {
+            if (TryStartGame()) (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+            return;
+        }
+        // The game closes itself after starting this; its files can't be replaced while it runs.
+        foreach (var running in Process.GetProcessesByName("brawl-engine")) running.WaitForExit(30000);
+        string title = Title ?? "";
+        IsEnabled = false;
+        try
+        {
+            await Updater.InstallAsync(release, installRoot, p => Dispatcher.UIThread.Post(() => Title = $"Updating to v{release.Version}...  {p}%"));
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false });
+            (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+        }
+        catch (Exception e)
+        {
+            IsEnabled = true;
+            Title = title;
+            await Message("Update", "The update could not be installed:\n" + e.Message + "\n\nDownload it from github.com/josiahg2502-glitch/BrawlRecompiled/releases instead.");
+        }
     }
 
     // The release keeps the game in engine/ next to this launcher; search up from the launcher's own folder.
@@ -583,6 +614,23 @@ sealed class MainWindow : Window
 
     // `online`: what the game's Online menu does at start (BRAWL_ONLINE: "host:<n>", "host-public:<n>", "browse",
     // "join:<code>", "menu"), or null for a normal start.
+    // The usual start: the game straight away (its settings are in its own options menu: F10, or Home on a controller).
+    // False when it can't start yet (no disc set up: this window's first-start setup is needed).
+    public bool TryStartGame()
+    {
+        if (!DiscStatus().ok || !File.Exists(gameExe)) return false;
+        if (config.Get("paths", "dvd_root") == null) { config.SetString("paths", "dvd_root", "../../Disc/DATA"); config.Save(); }
+        try
+        {
+            File.SetUnixFileMode(gameExe, File.GetUnixFileMode(gameExe) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+        }
+        catch (Exception) { }
+        Gamepads.Release();
+        var start = new ProcessStartInfo(gameExe) { WorkingDirectory = play, UseShellExecute = false };
+        start.Environment["LD_LIBRARY_PATH"] = play + (Environment.GetEnvironmentVariable("LD_LIBRARY_PATH") is { Length: > 0 } more ? ":" + more : "");
+        try { return Process.Start(start) != null; } catch (Exception) { return false; }
+    }
+
     async void Launch(string? online = null)
     {
         var (ok, text, _) = DiscStatus();
@@ -600,6 +648,13 @@ sealed class MainWindow : Window
             await Message("Brawl Recompiled", "The game files (the engine folder) are missing. Unpack the whole download again, keeping the engine folder next to this launcher.");
             return;
         }
+        // Some unpackers (and copies through a FAT/exFAT card) drop the executable bit: "Permission denied" (#24).
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(gameExe, File.GetUnixFileMode(gameExe) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+        }
+        catch (Exception) { }
         Gamepads.Release();
         var start = new ProcessStartInfo(gameExe) { WorkingDirectory = play, UseShellExecute = false };
         // The game's few bundled libraries (libpng) sit beside it.
@@ -1005,6 +1060,7 @@ sealed class MainWindow : Window
             {
                 if (disc.Problem() is { Length: > 0 } problem) { Say(problem); return; }
                 choose.IsEnabled = false;
+                bool extracted = false;
                 progress.IsVisible = true;
                 var staging = discDir + ".new";
                 try
@@ -1023,6 +1079,7 @@ sealed class MainWindow : Window
                     config.SetString("paths", "dvd_root", "../../Disc/DATA");  // relative to engine/UserData, so the folder can move
                     config.Save();
                     Say("Done. The disc is extracted and ready.");
+                    extracted = true;
                 }
                 catch (Exception ex)
                 {
@@ -1034,9 +1091,32 @@ sealed class MainWindow : Window
                     progress.IsVisible = false;
                     RefreshStatus();
                 }
+                // First start: the disc is ready, so on to the game.
+                if (extracted && !selfTest && TryStartGame()) (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
             }
         };
         body.Children.Add(choose);
+        // #20: a disc already extracted (by Dolphin, or an earlier install) is used where it is, no image needed.
+        var useFolder = Btn("Use an extracted game folder...", null);
+        useFolder.HorizontalAlignment = HorizontalAlignment.Left;
+        useFolder.Click += async () =>
+        {
+            var dir = await PickFolder("Choose the extracted Super Smash Bros. Brawl folder (the one holding sys and files)");
+            if (dir == null) return;
+            if (!File.Exists(Path.Combine(dir, "sys", "boot.bin")) && File.Exists(Path.Combine(dir, "DATA", "sys", "boot.bin"))) dir = Path.Combine(dir, "DATA");
+            string? before = config.Get("paths", "dvd_root");
+            config.SetString("paths", "dvd_root", dir);
+            var (ok, text, _) = DiscStatus();
+            if (!ok)
+            {
+                if (before == null) config.Remove("paths", "dvd_root"); else config.SetString("paths", "dvd_root", before);
+                Say(text);
+            }
+            config.Save();
+            RefreshStatus();
+            if (ok && !selfTest && TryStartGame()) (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+        };
+        body.Children.Add(useFolder);
         body.Children.Add(progress);
         body.Children.Add(progressText);
         body.Children.Add(dumpHelp = Note(

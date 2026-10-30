@@ -78,3 +78,4 @@ output.txt
 
 # NSMBW: pinned third-party dependency sources (Launcher/Prepare-Dependencies.ps1)
 /Dependencies/
+/native-build-v2/

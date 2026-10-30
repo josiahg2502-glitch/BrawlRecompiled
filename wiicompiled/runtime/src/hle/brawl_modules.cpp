@@ -19,6 +19,7 @@
 
 #include "abi_bridge.h"
 #include "guest_code_patch.h"
+#include "hle/gecko.h"
 #include "memory.h"
 #include "runtime_log.h"
 
@@ -74,6 +75,57 @@ const BrawlModule* FindModule(uint32_t id, size_t* index) {
     return nullptr;
 }
 
+// The executable sections of a module's pre-linked image: (offset from the image, size).
+std::vector<std::pair<uint32_t, uint32_t>> HomeCodeSections(size_t index) {
+    const BrawlModule& m = kModules[index];
+    const std::vector<uint8_t>& image = g_pristine[index];
+    auto read32 = [&](uint32_t at) {
+        return at + 4 <= image.size() ? (uint32_t{image[at]} << 24 | uint32_t{image[at + 1]} << 16 |
+                                         uint32_t{image[at + 2]} << 8 | image[at + 3])
+                                      : 0u;
+    };
+    std::vector<std::pair<uint32_t, uint32_t>> out;
+    uint32_t table = read32(0x10u);
+    if (table >= m.image) table -= m.image;  // pre-linked headers may hold absolute addresses
+    for (uint32_t i = 1; i < read32(0x0Cu); ++i) {
+        uint32_t offset = read32(table + i * 8u);
+        const uint32_t size = read32(table + i * 8u + 4u);
+        if ((offset & 1u) == 0 || size == 0) continue;
+        offset &= ~1u;
+        if (offset >= m.image) offset -= m.image;
+        out.emplace_back(offset, size);
+    }
+    return out;
+}
+
+// A module the game linked in place (a mod's, or any while codes are active) is still reached at its home by
+// translated callers: sora_scene creates Project+'s menus through the disc's sora_menu_main, so its My Music never
+// loaded a stage's tracklist. Calls into the home run the in-place code instead, section by section where the
+// layout is the disc's (Project+ patches code in place and appends a section).
+void RedirectHome(uint32_t header) {
+    size_t index = 0;
+    const BrawlModule* m = FindModule(Memory::Read32(header), &index);
+    if (m == nullptr || m->resident || g_pristine[index].empty()) return;
+    const uint32_t sections = Memory::Read32(header + 0x10u);  // absolute after Link
+    const uint32_t count = Memory::Read32(header + 0x0Cu);
+    for (const auto& [offset, size] : HomeCodeSections(index)) {
+        bool same = false;
+        uint32_t target = 0;
+        for (uint32_t i = 1; i < count && !same; ++i) {
+            const uint32_t value = Memory::Read32(sections + i * 8u);
+            same = (value & 1u) != 0 && (value & ~1u) - header == offset && Memory::Read32(sections + i * 8u + 4u) == size;
+            target = value & ~1u;
+        }
+        if (same) {
+            GuestCodePatch::RedirectModule(m->image + offset, m->image + offset + size, target, m->name);
+        } else {
+            GuestCodePatch::ClearRedirect(m->image + offset);
+            RT_LOGF(RT_TAG_OS, "REL module %s at 0x%08X: code layout differs from the disc's, calls into its home "
+                    "0x%08X run the disc's code\n", m->name, header, m->image + offset);
+        }
+    }
+}
+
 // Link (OSLink.c) for a vanilla module, with the code at its home. Returns false when the module is not one of
 // the disc's (unknown id, or modified bytes): the caller links it in place.
 bool LinkAtHome(uint32_t header, uint32_t gameBss) {
@@ -96,7 +148,8 @@ bool LinkAtHome(uint32_t header, uint32_t gameBss) {
 
     // Gecko codes patch modules where the game loads them (Project+ turns st_final into its custom stages): with codes
     // active, a module loaded on demand runs in place, where they reach it, not at its translated home.
-    if (!m->resident && GuestCodePatch::Active()) {
+    // Cheats alone (no mod's code list) keep the translated homes: in place, the modules would run interpreted.
+    if (!m->resident && GuestCodePatch::Active() && Gecko::ModCodesInstalled()) {
         return false;
     }
     // A resident module somewhere else (a mod moved the heap) is not the translated one.
@@ -109,6 +162,9 @@ bool LinkAtHome(uint32_t header, uint32_t gameBss) {
     // module's home is the game's buffer, whose header (rewritten by the game's loader) stays as it is.
     const auto& pristine = g_pristine[index];
     const uint32_t keep = m->resident ? 0x4Cu : 0u;
+    if (!m->resident) {
+        for (const auto& [offset, size] : HomeCodeSections(index)) GuestCodePatch::ClearRedirect(m->image + offset);
+    }
     std::memcpy(Memory::GetPointer(m->image + keep, m->fixSize - keep), pristine.data() + keep, m->fixSize - keep);
     std::memset(Memory::GetPointer(m->bss, m->bssSize ? m->bssSize : 4), 0, m->bssSize);
 
@@ -213,7 +269,10 @@ void LinkModule(CpuContext* ctx, bool fixed) {
     func_801DD964(ctx);
     RT_LOGF(RT_TAG_OS, "REL module %u linked in place at 0x%08X (%s)\n", Memory::Read32(header), header,
             ctx->gpr[3] ? "ok" : "FAILED");
-    if (ctx->gpr[3]) FixKnownModBugs(header);
+    if (ctx->gpr[3]) {
+        FixKnownModBugs(header);
+        RedirectHome(header);
+    }
 }
 
 }  // namespace

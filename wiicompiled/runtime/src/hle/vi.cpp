@@ -1,6 +1,7 @@
 #include <vector>
 #include "guest_code_patch.h"
 #include "hle/gecko.h"
+#include "save_states.h"
 #include "frame_input.h"
 #include "det_hash.h"
 #include "timebase_contract.h"
@@ -362,10 +363,11 @@ void WriteGuestStateLocked() {
 
 // The interval to the next retrace: the display lock's while V-Sync holds one (NTSC only).
 std::chrono::nanoseconds ActiveIntervalLocked() {
+    const int speed = settings_overlay::GameSpeed();
     if (g_vi.lockedInterval.count() > 0 && g_vi.tvFormat != 1) {
-        return g_vi.lockedInterval;
+        return g_vi.lockedInterval / speed;
     }
-    return g_vi.retraceInterval;
+    return g_vi.retraceInterval / speed;
 }
 
 uint64_t IntervalTicks(std::chrono::microseconds interval) {
@@ -1357,6 +1359,7 @@ extern "C" void VISetNextFrameBuffer_HLE_801baab8(CpuContext* ctx)
         WriteGuestStateLocked();
     }
     ViSetR3(ctx, 0);
+    SaveStates::FrameBoundary();  // a save or load the player asked for: here, between two frames
     Gecko::RunVbiHook(ctx);  // a Gecko code handler hooked at this function's blr
 }
 PPC_NATIVE_OVERRIDE_VOID(801E99C4, VISetNextFrameBuffer_HLE_801baab8, (CpuContext* ctx), (ctx));

@@ -2068,6 +2068,9 @@ void aurora_get_present_timing(AuroraPresentTiming* timing) {
 }
 void aurora_set_vsync(bool enabled) { aurora::webgpu::request_vsync(enabled); }
 bool aurora_get_vsync() { return aurora::webgpu::vsync_enabled(); }
+namespace aurora::gx { extern std::atomic<bool> g_pacingExempt; }
+void aurora_set_frame_pacing_exempt(bool exempt) { aurora::gx::g_pacingExempt.store(exempt, std::memory_order_release); }
+
 void aurora_set_frame_interpolation_fps(uint32_t targetFps) {
 #ifdef AURORA_ENABLE_GX
   aurora::gx::set_frame_interpolation_fps(targetFps);

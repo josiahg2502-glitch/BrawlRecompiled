@@ -6,7 +6,13 @@
 #include <filesystem>
 extern "C" uint8_t* aurora_load_png_rgba(const char* path, uint32_t* width, uint32_t* height);
 #include "netplay/game_layout.h"
+#include "netplay/menu_kit.h"
+#include "netplay_start.h"
+#include "save_states.h"
+#include "updates.h"
+#include "brawl_version.h"
 #include "netplay_lobby.h"
+#include "netplay_session.h"
 #include "netplay_ui.h"
 #include "settings_overlay.h"
 #include "online_menu.h"
@@ -25,10 +31,13 @@ extern "C" uint8_t* aurora_load_png_rgba(const char* path, uint32_t* width, uint
 #include <dolphin/gx/GXAurora.h>
 #include "runtime_log.h"
 #include "memory.h"
+#include "generated/RuntimeConfig.h"
 #include "wii_remote_input.h"
 
 #include <imgui.h>
+#include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_misc.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
@@ -36,6 +45,10 @@ extern "C" uint8_t* aurora_load_png_rgba(const char* path, uint32_t* width, uint
 #include <SDL3/SDL_timer.h>
 
 #include <array>
+#include <functional>
+#include <mutex>
+#include <set>
+#include <thread>
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -91,6 +104,7 @@ const char* GraphicsApiDisplayName() {
 
 bool g_topBarVisible = false;
 bool g_exitPromptOpen = false;
+std::atomic<bool> g_fastForward{std::getenv("BRAWL_FAST_FORWARD") != nullptr};  // the env var: tests start with it on
 bool g_rumbleEnabled = RuntimeConfigFile::RumbleEnabled(true);
 int g_controllerPort = 0;
 float g_resolutionScale = RuntimeConfigFile::ResolutionMultiplier(1.0f);
@@ -255,7 +269,7 @@ void LimitResolutionForIntegratedGpu() {
     DisplaySettings::Settings settings = DisplaySettings::Latest();
     settings.renderScale = g_resolutionScale;
     DisplaySettings::Request(settings);
-    g_notice = "Integrated graphics: rendering at 1080p to keep the game at full speed. F10 > Resolution raises it.";
+    g_notice = "Integrated graphics: rendering at 1080p to keep the game at full speed. Options (F10) > Graphics > Resolution raises it.";
     g_noticeFrames = 60 * 8;
     RT_LOGF(RT_TAG_CONFIG, "integrated GPU: rendering at 1080p this session (the saved resolution is kept)\n");
 }
@@ -609,6 +623,43 @@ void CompleteRebind(uint32_t value) {
     g_rebind.active = false;
 }
 
+// Waits for the input a rebind asked for (any keyboard key, mouse button, or controller input), or its timeout.
+void PollRebind(bool overControl, bool clear = false) {
+    if (!g_rebind.active) return;
+    const float remaining = std::chrono::duration<float>(g_rebind.deadline - Clock::now()).count();
+    if (g_rebind.active && (clear || remaining <= 0.0f)) {
+        CompleteRebind(g_rebind.kind == RebindKind::Controller ? PAD_NATIVE_BUTTON_DISABLED
+                                                              : static_cast<uint32_t>(PAD_KEY_INVALID));
+    } else if (g_rebind.active && SDL_GetKeyboardFocus() != nullptr && g_rebind.kind != RebindKind::Controller) {
+        int count = 0;
+        const bool* keys = SDL_GetKeyboardState(&count);
+        for (int i = 1; i < std::min(count, static_cast<int>(SDL_SCANCODE_COUNT)) && g_rebind.active; ++i) {
+            if (keys[i] && !g_rebind.keys[i] && i != SDL_SCANCODE_F10) CompleteRebind(i);
+            g_rebind.keys[i] = keys[i];
+        }
+        const uint32_t mouse = SDL_GetMouseState(nullptr, nullptr);
+        for (int i = 1; i <= 5 && g_rebind.active; ++i)
+            if (!overControl && g_rebind.kind != RebindKind::MuteHotkey &&
+                (mouse & ~g_rebind.mouse & (1u << (i - 1))) != 0) CompleteRebind(static_cast<uint32_t>(-i - 1));
+        g_rebind.mouse = mouse;
+    } else if (g_rebind.active && SDL_GetKeyboardFocus() != nullptr && g_rebind.kind == RebindKind::Controller) {
+        auto* pad = SDL_GetGamepadFromID(g_rebind.instance);
+        if (pad != nullptr) {
+            for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT && g_rebind.active; ++i) {
+                const bool pressed = SDL_GetGamepadButton(pad, static_cast<SDL_GamepadButton>(i));
+                if (pressed && !g_rebind.buttons[i]) CompleteRebind(i);
+                g_rebind.buttons[i] = pressed;
+            }
+            for (int i = 0; i < SDL_GAMEPAD_AXIS_COUNT && g_rebind.active; ++i) {
+                const int value = SDL_GetGamepadAxis(pad, static_cast<SDL_GamepadAxis>(i));
+                if (std::abs(value) < 8000) g_rebind.axesReady[i] = true;
+                if (g_rebind.axesReady[i] && std::abs(value) >= 16384)
+                    CompleteRebind(PADEncodeAxisButton(i, value < 0));
+            }
+        }
+    }
+}
+
 void DrawRebindPrompt() {
     if (g_rebind.openPopup) {
         ImGui::OpenPopup("Rebind input");
@@ -634,37 +685,7 @@ void DrawRebindPrompt() {
         if (ImGui::Button("Cancel")) g_rebind.active = false;
         // UI clicks must not become mouse bindings (buttons activate on release).
         const bool overControl = ImGui::IsAnyItemHovered();
-        if (g_rebind.active && (clear || remaining <= 0.0f)) {
-            CompleteRebind(g_rebind.kind == RebindKind::Controller ? PAD_NATIVE_BUTTON_DISABLED
-                                                                  : static_cast<uint32_t>(PAD_KEY_INVALID));
-        } else if (g_rebind.active && SDL_GetKeyboardFocus() != nullptr && g_rebind.kind != RebindKind::Controller) {
-            int count = 0;
-            const bool* keys = SDL_GetKeyboardState(&count);
-            for (int i = 1; i < std::min(count, static_cast<int>(SDL_SCANCODE_COUNT)) && g_rebind.active; ++i) {
-                if (keys[i] && !g_rebind.keys[i] && i != SDL_SCANCODE_F10) CompleteRebind(i);
-                g_rebind.keys[i] = keys[i];
-            }
-            const uint32_t mouse = SDL_GetMouseState(nullptr, nullptr);
-            for (int i = 1; i <= 5 && g_rebind.active; ++i)
-                if (!overControl && g_rebind.kind != RebindKind::MuteHotkey &&
-                    (mouse & ~g_rebind.mouse & (1u << (i - 1))) != 0) CompleteRebind(static_cast<uint32_t>(-i - 1));
-            g_rebind.mouse = mouse;
-        } else if (g_rebind.active && SDL_GetKeyboardFocus() != nullptr && g_rebind.kind == RebindKind::Controller) {
-            auto* pad = SDL_GetGamepadFromID(g_rebind.instance);
-            if (pad != nullptr) {
-                for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT && g_rebind.active; ++i) {
-                    const bool pressed = SDL_GetGamepadButton(pad, static_cast<SDL_GamepadButton>(i));
-                    if (pressed && !g_rebind.buttons[i]) CompleteRebind(i);
-                    g_rebind.buttons[i] = pressed;
-                }
-                for (int i = 0; i < SDL_GAMEPAD_AXIS_COUNT && g_rebind.active; ++i) {
-                    const int value = SDL_GetGamepadAxis(pad, static_cast<SDL_GamepadAxis>(i));
-                    if (std::abs(value) < 8000) g_rebind.axesReady[i] = true;
-                    if (g_rebind.axesReady[i] && std::abs(value) >= 16384)
-                        CompleteRebind(PADEncodeAxisButton(i, value < 0));
-                }
-            }
-        }
+        PollRebind(overControl, clear);
     }
     if (!g_rebind.active) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
@@ -1338,6 +1359,21 @@ void DrawFpsOverlay() {
         g_frameTimes[g_frameTimeNext] = dt > 0.0f && dt < 1.0f ? dt * 1000.0f : 0.0f;
         g_frameTimeNext = (g_frameTimeNext + 1) % kFrameTimeCount;
     }
+    // Tests: BRAWL_LOG_PRESENT=1 logs the displayed and motion frame rates and the worst frame every 2 s.
+    static const bool logPresent = std::getenv("BRAWL_LOG_PRESENT") != nullptr;
+    if (logPresent) {
+        static double windowStart = ImGui::GetTime(), worst = 0;
+        static int frames = 0;
+        worst = std::max(worst, static_cast<double>(ImGui::GetIO().DeltaTime) * 1000.0);
+        ++frames;
+        if (ImGui::GetTime() - windowStart >= 2.0) {
+            RT_LOGF(RT_TAG_VI, "[present] %.1f fps (motion %.1f), %d frames, worst %.1f ms, scene %s\n", presentTiming.framesPerSecond,
+                    presentTiming.effectiveFramesPerSecond, frames, worst, SaveStates::SceneName().c_str());
+            windowStart = ImGui::GetTime();
+            worst = 0;
+            frames = 0;
+        }
+    }
     if (!g_showFps && !g_frameGraph) {
         return;
     }
@@ -1552,7 +1588,7 @@ void DrawStartupScreen() {
                 GameLayout::DrawText(list, view, small, u, 0.0f, cardY - 30.0f + bob, Fit(small, u, 17.0f), 0xD6D9E4FFu,
                                      0xB8BCCBFFu, 1.0f, 1, 1);
                 // How to reach the settings, along the card's bottom edge.
-                const auto hint = GameLayout::Utf16("F9 = online play   F10 = settings   F11 = fullscreen / window");
+                const auto hint = GameLayout::Utf16("F10 or Home = options   F5 / F7 = save / load state   F8 = fast-forward   F9 = online");
                 GameLayout::DrawText(list, view, small, hint, 0.0f, cardY - hh + 16.0f + bob, Fit(small, hint, 12.0f),
                                      0x8E93A6FFu, 0x8E93A6FFu, 1.0f, 1, 1);
             }
@@ -1704,6 +1740,8 @@ void DrawExitPrompt() {
     ImGui::EndPopup();
 }
 
+#include "settings_menu.inc"
+
 void DrawTopBar() {
     if (!g_topBarVisible) {
         return;
@@ -1781,6 +1819,8 @@ void DrawTopBar() {
         DrawGraphicsSettings();
         ImGui::EndMenu();
     }
+
+    if (bool fast = g_fastForward.load(); ImGui::MenuItem("Fast-forward (F8)", nullptr, &fast)) g_fastForward.store(fast);
 
     if (ImGui::MenuItem("Online (F9)")) {
         OnlineMenu::SetOpen(true);
@@ -1948,6 +1988,15 @@ void HandleEvents(const AuroraEvent* events) noexcept {
             SetTopBarVisible(!g_topBarVisible);
             ApplyInputBlockState();
         }
+        if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_F8)) g_fastForward.store(!g_fastForward.load());
+        // F5 / F7: save / load state in the chosen slot, F6: the next slot.
+        if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_F5)) SaveStates::RequestSave();
+        if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_F7)) SaveStates::RequestLoad();
+        if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_F6)) {
+            SaveStates::SetSlot((SaveStates::Slot() + 1) % SaveStates::kSlots);
+            g_notice = "Save state slot " + std::to_string(SaveStates::Slot() + 1) + ": " + SaveStates::Describe(SaveStates::Slot());
+            g_noticeFrames = 60 * 3;
+        }
         // F9: the online play menu.
         if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_F9)) {
             OnlineMenu::SetOpen(!OnlineMenu::IsOpen());
@@ -1965,8 +2014,6 @@ void HandleEvents(const AuroraEvent* events) noexcept {
         if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_ESCAPE)) {
             if (g_exitPromptOpen) {
                 g_exitPromptOpen = false;
-            } else if (g_topBarVisible) {
-                SetTopBarVisible(false);
             }
             ApplyInputBlockState();
         }
@@ -1995,6 +2042,12 @@ void SetShowFps(bool show) noexcept {
 
 bool ShowFps() noexcept {
     return g_showFps;
+}
+
+int GameSpeed() noexcept { return g_gameSpeed.load(std::memory_order_relaxed); }
+
+bool FastForward() noexcept {
+    return g_fastForward.load(std::memory_order_relaxed) && !NetplaySession::Active();
 }
 
 void SetVSync(bool enabled) noexcept {
@@ -2265,7 +2318,13 @@ void Draw() noexcept {
     }
     NetplayUi::Draw();
     DrawFpsOverlay();
-    DrawTopBar();
+    PollMenuButton();
+    DrawOptionsMenu();
+    UpdateGameSpeed();
+    if (std::string message = SaveStates::TakeMessage(); !message.empty()) {
+        g_notice = message;
+        g_noticeFrames = 60 * 3;
+    }
     DrawExitPrompt();
     controller_mapping_wizard::Draw();
     DrawNotice();

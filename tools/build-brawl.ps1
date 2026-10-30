@@ -7,7 +7,10 @@ param(
     [int]$Jobs = 0,
     [switch]$SkipTools,
     [switch]$SkipTranslate,
-    [switch]$ConfigureOnly
+    [switch]$ConfigureOnly,
+    # The engine for processors without AVX2/FMA (x86-64-v2): engine_usa_v2.dll, built in native-build-v2; the
+    # loader picks it on such a CPU.
+    [switch]$OldCpu
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
@@ -15,11 +18,11 @@ Set-StrictMode -Version 3.0
 $root = Split-Path -Parent $PSScriptRoot            # <project>\tools -> <project>
 $wc = Join-Path $root 'wiicompiled'
 $toolchain = Join-Path $root 'toolchain'
-$logs = Join-Path $root 'build-logs'
+$logs = Join-Path $root $(if ($OldCpu) { 'build-logs-v2' } else { 'build-logs' })
 $project = 'projects/brawl/recomp.yml'
 $workspace = $wc        # the translator's cwd: runtime\, generated\ and native-build\ live under it
 # Play\SuperSmashBrosBrawl.exe (the loader, runtime\src\product\engine_loader.cpp) plus the engine module engine_usa.dll.
-$module = 'engine_usa'
+$module = if ($OldCpu) { 'engine_usa_v2' } else { 'engine_usa' }
 $game = 'game'
 if ($Jobs -le 0) {
     # A translated shard compile can take ~2.5 GB; one job per core exhausted a 16 GB machine.
@@ -102,7 +105,7 @@ if (-not $SkipTranslate) {
 # 3. Configure and compile with the portable toolchain on a scrubbed PATH
 $env:PATH = Get-MkwToolchainPath $toolchain
 $bin = Join-Path $toolchain 'llvm-mingw\bin'
-$build = Join-Path $workspace 'native-build'
+$build = Join-Path $workspace $(if ($OldCpu) { 'native-build-v2' } else { 'native-build' })
 $configure = Get-MkwNativeConfigureArguments `
     -SourceDirectory (Join-Path $workspace 'runtime') -BuildDirectory $build `
     -Ninja (Join-Path $toolchain 'Ninja\ninja.exe') `
@@ -110,7 +113,8 @@ $configure = Get-MkwNativeConfigureArguments `
     -CxxCompiler (Join-Path $bin 'x86_64-w64-mingw32-clang++.exe') `
     -ResourceCompiler (Join-Path $bin 'x86_64-w64-mingw32-windres.exe') `
     -DependenciesDirectory (Join-Path $wc 'Dependencies') `
-    -AdditionalArguments @("-DMKW_TRANSLATED_COMPILE_JOBS=$Jobs", '-DMKW_ENGINE_MODULE=ON', "-DMKW_ENGINE_MODULE_NAME=$module")
+    -AdditionalArguments (@("-DMKW_TRANSLATED_COMPILE_JOBS=$Jobs", '-DMKW_ENGINE_MODULE=ON', "-DMKW_ENGINE_MODULE_NAME=$module") +
+                          $(if ($OldCpu) { @('-DMKW_HOST_ISA=v2') } else { @() }))
 $cmake = Join-Path $toolchain 'CMake\bin\cmake.exe'
 Invoke-Step 'configure' $cmake $configure $workspace
 if ($ConfigureOnly) { Set-Status 'configure only: done'; exit 0 }
@@ -130,7 +134,7 @@ function Copy-ReplacingLocked($from, $to) {
     }
 }
 Copy-ReplacingLocked (Join-Path $build "$module.dll") (Join-Path $root "Play\$module.dll")
-Copy-ReplacingLocked (Join-Path $build 'WiiCompiled.exe') $playExe
+if (-not $OldCpu) { Copy-ReplacingLocked (Join-Path $build 'WiiCompiled.exe') $playExe }
 Set-Status "copied to Play\$module.dll and Play\SuperSmashBrosBrawl.exe"
 # Unattended test run: autotest\autorun.txt present -> start the game (its own autoexit.txt ends it) with logs.
 if (Test-Path (Join-Path $root 'autotest\autorun.txt')) {

@@ -305,6 +305,11 @@ static void QueueDvdCallback(uint32_t callbackPtr, int32_t result, uint32_t comm
     std::lock_guard<std::mutex> lock(g_pendingDvdCallbackMutex);
     g_pendingDvdCallbacks.push_back({callbackPtr, result, commandBlock});
 }
+// Save states wait for none to be queued (save_states.cpp).
+size_t DvdPendingCallbackCount() {
+    std::lock_guard<std::mutex> lock(g_pendingDvdCallbackMutex);
+    return g_pendingDvdCallbacks.size();
+}
 bool DvdProcessPendingCallbacks(CpuContext* cpu) {
     static thread_local int depth = 0;
     if (depth != 0) return false;   // a callback that queues another read drains on the outer loop

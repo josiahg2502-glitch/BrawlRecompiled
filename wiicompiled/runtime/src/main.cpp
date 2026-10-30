@@ -60,6 +60,7 @@
 #endif
 
 #include "hle/gecko.h"
+#include "save_states.h"
 #include "guest_code_patch.h"
 #include "hle/storage/sd_card.h"
 #include "netplay_ui.h"
@@ -1668,6 +1669,8 @@ int RuntimeMain(int argc, char** argv) {
         currentEntryLabel = label;
         g_lastEntryLabel = currentEntryLabel;
 
+        char stackTop = 0;  // the game's main thread runs below here (save_states.h)
+        SaveStates::MarkStackTop(&stackTop + 1);
         InvokeIndirectCpu(entry->address, &cpu);
         const uint32_t result = cpu.gpr[3];
         RT_LOG(RT_TAG_RUNTIME) << label << " => 0x" << std::hex << result << std::dec << " (" << result << ")" << std::endl;

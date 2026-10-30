@@ -85,31 +85,47 @@ sealed class WiiDisc : IDisposable
             if (U32(dolHeader, 0x90 + 4 * i) != 0) dolSize = Math.Max(dolSize, (long)U32(dolHeader, 4 * i) + U32(dolHeader, 0x90 + 4 * i));
         var apl = ReadData(0x2440, 0x20);
         long aplSize = 0x20 + (long)U32(apl, 0x14) + U32(apl, 0x18);
+        // The file table comes from the image: bounded, and every name a plain file name (#17), so a damaged or
+        // crafted image can't write outside outDir or run away with memory.
+        if (fstSize < 12 || fstSize > 16 << 20) throw new InvalidDataException("the disc's file table is damaged");
         var fst = ReadData(fstOff, (int)fstSize);
         int entries = (int)U32(fst, 8);
+        if (entries < 1 || (long)entries * 12 > fst.Length) throw new InvalidDataException("the disc's file table is damaged");
         int nameBase = entries * 12;
 
         var files = new List<(string path, long off, long size)>();
-        void Walk(int i, int end, string dir)
+        void Walk(int i, int end, string dir, int depth)
         {
+            if (depth > 32) throw new InvalidDataException("the disc's file table is damaged");
             while (i < end)
             {
                 int nameOff = (fst[i * 12 + 1] << 16) | (fst[i * 12 + 2] << 8) | fst[i * 12 + 3];
-                int nameEnd = Array.IndexOf(fst, (byte)0, nameBase + nameOff);
+                int nameEnd = nameBase + nameOff < fst.Length ? Array.IndexOf(fst, (byte)0, nameBase + nameOff) : -1;
+                if (nameEnd < 0) throw new InvalidDataException("the disc's file table is damaged");
                 string name = System.Text.Encoding.UTF8.GetString(fst, nameBase + nameOff, nameEnd - nameBase - nameOff);
+                if (name.Length == 0 || name == "." || name == ".." || name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 ||
+                    name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    throw new InvalidDataException("the disc's file table has an unsafe file name");
                 uint a = U32(fst, i * 12 + 4), b = U32(fst, i * 12 + 8);
-                if (fst[i * 12] != 0) { Walk(i + 1, (int)b, Path.Combine(dir, name)); i = (int)b; }
+                if (fst[i * 12] != 0)
+                {
+                    if (b <= (uint)i || b > (uint)end) throw new InvalidDataException("the disc's file table is damaged");
+                    Walk(i + 1, (int)b, Path.Combine(dir, name), depth + 1);
+                    i = (int)b;
+                }
                 else { files.Add((Path.Combine(dir, name), (long)a << 2, b)); i++; }
             }
         }
-        Walk(1, entries, "files");
+        Walk(1, entries, "files", 0);
 
         int total = files.Count + 5, done = 0;
         void Put(string rel, long off, long size)
         {
             cancel.ThrowIfCancellationRequested();
             progress?.Invoke(done, total, rel);
-            var path = Path.Combine(outDir, rel);
+            var root = Path.GetFullPath(outDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var path = Path.GetFullPath(Path.Combine(outDir, rel));
+            if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("the disc's file table has an unsafe file name");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             using var f = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16);
             for (long o = 0; o < size; o += 1 << 20)

@@ -604,10 +604,25 @@ inline double PPC_PsMulNoNiInline(double lhs, double rhs)
 // accumulator-first operand order, unlike x86's _mm_fmadd_ps(a, b, c) = a*b + c - msub is
 // therefore an fma against a negated accumulator. That vneg would flip a sole-NaN subtractor's
 // sign, which x86's vfmsub does not do, so the NaN resolver receives the original subtractor.
+#if defined(__x86_64__) && !defined(__FMA__)
+// The older-processor build (no FMA instruction): the same single rounding per lane, from the C library.
+inline PpcPairVec PpcFmaLanesNoFmaInline(PpcPairVec a, PpcPairVec b, PpcPairVec c, float cSign)
+{
+    alignas(16) float x[4], y[4], z[4];
+    _mm_store_ps(x, a);
+    _mm_store_ps(y, b);
+    _mm_store_ps(z, c);
+    for (int i = 0; i < 4; ++i) z[i] = std::fmaf(x[i], y[i], cSign < 0.0f ? -z[i] : z[i]);
+    return _mm_load_ps(z);
+}
+#endif
+
 inline PpcPairVec PpcFmaddPairInline(PpcPairVec multiplicand, PpcPairVec multiplier, PpcPairVec addend)
 {
-#if defined(__x86_64__)
+#if defined(__x86_64__) && defined(__FMA__)
     return _mm_fmadd_ps(multiplicand, multiplier, addend);
+#elif defined(__x86_64__)
+    return PpcFmaLanesNoFmaInline(multiplicand, multiplier, addend, 1.0f);
 #elif defined(__aarch64__)
     const PpcPairVec result = vfma_f32(addend, multiplicand, multiplier);
     if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
@@ -618,8 +633,10 @@ inline PpcPairVec PpcFmaddPairInline(PpcPairVec multiplicand, PpcPairVec multipl
 
 inline PpcPairVec PpcFmsubPairInline(PpcPairVec multiplicand, PpcPairVec multiplier, PpcPairVec subtractor)
 {
-#if defined(__x86_64__)
+#if defined(__x86_64__) && defined(__FMA__)
     return _mm_fmsub_ps(multiplicand, multiplier, subtractor);
+#elif defined(__x86_64__)
+    return PpcFmaLanesNoFmaInline(multiplicand, multiplier, subtractor, -1.0f);
 #elif defined(__aarch64__)
     const PpcPairVec result = vfma_f32(vneg_f32(subtractor), multiplicand, multiplier);
     if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]

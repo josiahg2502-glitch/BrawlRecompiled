@@ -1,26 +1,43 @@
 BRAWL RECOMPILED {VERSION} for Linux
 ====================================
-Start: open "Brawl Recompiled" and press PLAY. (If your file manager won't run it: right-click it > Properties >
-allow running as a program, or run  ./"Brawl Recompiled"  in a terminal.)
+Start: open "Brawl Recompiled". The game starts straight away. (If your file manager won't run it: right-click it >
+Properties > allow running as a program, or run  ./"Brawl Recompiled"  in a terminal.) Steam Deck: add it to Steam
+as a non-Steam game and play in Game Mode with the controller.
 
-First time only: on the Play page, choose your Super Smash Bros. Brawl disc image (.iso / .ciso / .wbfs, USA
-RSBE01). The launcher extracts it into the Disc folder here (about 7 GB).
+First time only: a window asks for your Super Smash Bros. Brawl disc image (.iso / .ciso / .wbfs, USA RSBE01). It is
+extracted into the Disc folder here (about 7 GB), then the game starts.
 
-Settings: the launcher's Display page (resolution, aspect, frame interpolation) and Controls page (gamepads and the
-keyboard). In the game, F10 opens the settings menu and F11 switches between fullscreen and a window.
+Options: F10, or Home (or Back and Start together) on a controller, opens the options menu in the game: graphics,
+audio, controls, gameplay, cheats, mods, online play, updates and quitting. Other keys:
+  F5 / F7  save / load state (F6 picks the slot)    F8  fast-forward    F9  online play    F11  fullscreen / window
+Save states save the game exactly as it is, anywhere (mid-fight, mid-level). They last until you close the game, and
+load in the same match or level they were saved in.
 
-Mods (Mods page):
-- SD card mods, Project+ included: engine/UserData/SD is the game's SD card. Copy a mod's SD card contents into it
-  (for Project+: its Project+, private and apps folders). Gecko codes go with them (sd:/<mod>/RSBE01.GCT).
-  Several builds can share the card: "Build to play" on the Mods page picks the one that runs (or vanilla Brawl). Builds that work
-  here, each as the folder from its Wii/console download: Project+ (Project+), Project+Ex (P+Ex), REX (rex_),
-  Brawl Minus (Minusery), Legacy XP (LegacyXP). The first start after adding one builds the card image (minutes).
+Cheats: Gecko codes in Dolphin's format in engine/UserData/Cheats/RSBE01.ini (paste a Dolphin cheat file in as it
+is); switch them on and off in Options > Cheats. Comes with 9 codes tested on this port: tournament
+settings (everything unlocked), bigger fighters (2x/3x/4x), invisible or emerald fighters, infinite shield,
+infinite jumps and no "Ready to fight" bar. Not in online play.
+
+Mods (Options > Mods):
+- SD card mods, Project+ included: engine/UserData/SD is the game's SD card. "Add a mod" copies a mod's extracted Wii
+  download onto it, or copy its SD card contents in yourself (for Project+: its Project+, private and apps folders).
+  Several builds can share the card: "Build to play" picks the one that runs (or vanilla Brawl). Builds that work
+  here: Project+ (Project+), Project+Ex (P+Ex), REX (rex_), Brawl Minus (Minusery), Legacy XP (LegacyXP).
 - Mods that replace game files or textures: one folder per mod in engine/UserData/mods.
+- HD texture packs made for Dolphin (REX and Project+ ship them): copy the pack's RSBE01 folder (inside Dolphin's
+  Load/Textures) into engine/UserData/texture_replacements.
 
-Online (F10 in the game, then Online): host a room or join one on your network, over Tailscale, or by the host's
-address (the host forwards UDP port 52130). Everyone needs the same build: vanilla, or the same mod.
+Ultrawide: Options > Graphics > Aspect ratio > Fill Window uses the whole screen up to 32:9, with the HUD kept in the
+middle 16:9.
+
+Updates: the game checks for new versions (needs curl); Options > System installs one (your saves, settings and mods
+stay).
+
+Online (F9, or Options > Online): host a room or join one on your network, over Tailscale, or by the host's address
+(the host forwards UDP port 52130). Everyone needs the same build: vanilla, or the same mod.
 
 Your saves, settings and mods live in engine/UserData. Keep this folder together; it needs nothing else.
-Needs: 64-bit Linux from 2022 or newer (glibc 2.35) with Vulkan graphics drivers.
+"Brawl Recompiled --settings" opens the old settings window (Wii save import, keyboard keys).
+Needs: 64-bit Linux from 2022 or newer (glibc 2.35) with Vulkan graphics drivers, and a processor with AVX2.
 
 Credits and licenses: CREDITS.txt and LICENSE.txt.

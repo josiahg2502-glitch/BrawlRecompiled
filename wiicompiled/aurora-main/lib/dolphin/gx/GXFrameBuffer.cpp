@@ -492,8 +492,12 @@ void GXCopyTex(void* dest, GXBool clear) {
   // SPM: with the view widened past 16:9 (Hor+), the game's screen coordinates squeeze toward the centre. A copy
   // of part of the screen (the door-opening effect copies the door) must take the same squeeze to find it;
   // full-width copies stay full-width, since what they're drawn back with covers the whole screen.
+  // Brawl: render-to-texture passes (a 512x512 viewport in the corner) were drawn unwidened, so their copies keep
+  // their place: only a copy made under a screen-sized viewport takes the squeeze.
+  const auto& copyVp = g_gxState.xfViewport;
+  const bool screenViewport = copyVp[0] * 2.0f >= 600.0f && -copyVp[1] * 2.0f >= 440.0f;
   if (const float widen = aurora::gx::fifo::g_spmScreenWiden; widen < 1.f && !g_gxState.texCopySrcRenderSpace &&
-      g_gxState.texCopySrc.width < static_cast<int32_t>(aurora::gx::logical_fb_size().x)) {
+      screenViewport && g_gxState.texCopySrc.width < static_cast<int32_t>(aurora::gx::logical_fb_size().x)) {
     const float cx = static_cast<float>(aurora::gfx::get_render_target_size().x) * 0.5f;
     auto& sr = sourceRect.sampleRect;
     sr.x() = cx + (sr.x() - cx) * widen;

@@ -19,6 +19,8 @@ void ShutdownScheduler(Handle scheduler);
 Handle Create(std::size_t stackSize, Entry entry, void* argument);
 void Destroy(Handle context);
 bool IsCurrent(Handle context);
+// The context running now (the scheduler's own handle on the thread that initialized it).
+Handle Current();
 void Switch(Handle target);
 
 } // namespace HostContext

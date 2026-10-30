@@ -36,4 +36,10 @@ float RenderScale() noexcept;
 // DisplaySettings' aspect (4:3, 16:9, Fill), including a change not yet applied. Saved to Config.toml.
 void SetAspect(int32_t mode) noexcept;
 int32_t Aspect() noexcept;
+// Fast-forward (F8 or the options menu): the game's clock runs [gameplay] fast_forward_speed times as fast. Never
+// during online play.
+bool FastForward() noexcept;
+// How many times as fast as normal the game's clock runs now: fast-forward, or the fast menus (2x in menus and
+// loading screens), else 1.
+int GameSpeed() noexcept;
 } // namespace settings_overlay

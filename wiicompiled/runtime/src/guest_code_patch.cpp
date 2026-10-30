@@ -45,6 +45,12 @@ std::unordered_set<uint32_t> g_reported;                                        
 std::unordered_set<uint32_t> g_loggedWords;                                        // BRAWL_PATCH_LOG words logged
 std::vector<uint32_t> g_forced;                                                    // BRAWL_INTERPRET guard indices
 
+// RedirectModule's home ranges, read without the lock by every patched call (start 0: a free slot).
+struct Redirect {
+    std::atomic<uint32_t> start{0}, end{0}, target{0};
+};
+Redirect g_redirects[16];
+
 // The cached (0x8/0x9) view: the trap also fires for the uncached alias of guarded code.
 uint32_t Cached(uint32_t address) { return (address & 0xE0000000u) == 0xC0000000u ? address - 0x40000000u : address; }
 
@@ -237,7 +243,63 @@ void Reapply(uint32_t start, uint32_t end) {
     Sync();
 }
 
+void RedirectModule(uint32_t homeStart, uint32_t homeEnd, uint32_t target, const char* name) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    Redirect* slot = nullptr;
+    for (Redirect& r : g_redirects) {
+        const uint32_t start = r.start.load(std::memory_order_relaxed);
+        if (start == homeStart || (slot == nullptr && start == 0)) slot = &r;
+    }
+    if (slot == nullptr) {
+        RT_LOGF(RT_TAG_MOD, "[mods] module %s: no free redirect slot, its home code keeps running\n", name);
+        return;
+    }
+    // Disabled while it changes, so a call never pairs the old target with the new range.
+    slot->start.store(0, std::memory_order_release);
+    slot->end.store(homeEnd, std::memory_order_relaxed);
+    slot->target.store(target, std::memory_order_relaxed);
+    slot->start.store(homeStart, std::memory_order_release);
+    uint32_t count = 0;
+    for (int64_t index = std::max<int64_t>(FunctionIndex(homeStart), 0);
+         index < static_cast<int64_t>(g_mkwGuardedFunctionCount); ++index) {
+        const uint32_t function = g_mkwGuardedFunctionStarts[index];
+        if (function >= homeEnd) break;
+        if (function < homeStart || g_mkwGuestCodePatched[index]) continue;
+        g_mkwGuestCodePatched[index] = 1;
+        MarkInliningCallers(static_cast<uint32_t>(index));
+        ++count;
+    }
+    RT_LOGF(RT_TAG_MOD, "[mods] module %s linked at 0x%08X: calls into its home 0x%08X-0x%08X (%u function(s)) run it "
+            "there\n", name, target, homeStart, homeEnd, count);
+}
+
+void ClearRedirect(uint32_t homeStart) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (Redirect& r : g_redirects) {
+        if (r.start.load(std::memory_order_relaxed) != homeStart) continue;
+        const uint32_t end = r.end.load(std::memory_order_relaxed);
+        r.start.store(0, std::memory_order_release);
+        for (int64_t index = std::max<int64_t>(FunctionIndex(homeStart), 0);
+             index < static_cast<int64_t>(g_mkwGuardedFunctionCount); ++index) {
+            const uint32_t function = g_mkwGuardedFunctionStarts[index];
+            if (function >= end) break;
+            if (function >= homeStart) g_mkwGuestCodePatched[index] = 0;
+        }
+        for (const uint32_t index : g_forced) {
+            const uint32_t function = g_mkwGuardedFunctionStarts[index];
+            if (function >= homeStart && function < end) g_mkwGuestCodePatched[index] = 1;
+        }
+    }
+}
+
 void RunPatched(uint32_t address, CpuContext* ctx) {
+    for (const Redirect& r : g_redirects) {
+        const uint32_t start = r.start.load(std::memory_order_acquire);
+        if (start != 0 && address >= start && address < r.end.load(std::memory_order_relaxed)) {
+            address = address - start + r.target.load(std::memory_order_relaxed);
+            break;
+        }
+    }
     PpcInterpreter::Run(ctx, address);
     // A patched function is usually a mod hook, and what it called may have patched more code (a Gecko hook runs
     // the code handler): that takes effect now, as the handler's isync makes it on a Wii.

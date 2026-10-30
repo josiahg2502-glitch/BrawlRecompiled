@@ -68,6 +68,11 @@ void Destroy(Handle context)
     }
 }
 
+Handle Current()
+{
+    return GetCurrentFiber();
+}
+
 bool IsCurrent(Handle context)
 {
     return context != nullptr && GetCurrentFiber() == context;
@@ -216,6 +221,11 @@ void Destroy(Handle context)
     delete nativeContext;
 }
 
+Handle Current()
+{
+    return g_current;
+}
+
 bool IsCurrent(Handle context)
 {
     return context != nullptr && context == g_current;
@@ -321,6 +331,11 @@ void Destroy(Handle context)
         co_delete(nativeContext->native);
     }
     delete nativeContext;
+}
+
+Handle Current()
+{
+    return g_current;
 }
 
 bool IsCurrent(Handle context)

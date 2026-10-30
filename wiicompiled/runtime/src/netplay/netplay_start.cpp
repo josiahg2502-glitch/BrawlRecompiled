@@ -31,6 +31,8 @@ bool RestartGame();
 }
 #endif
 
+namespace SdCard { void Shutdown(); }  // hle/storage/sd_card.h
+
 namespace NetplayStart {
 namespace {
 
@@ -224,6 +226,11 @@ void PrepareToLeave() {
     }
     std::error_code ec;
     std::filesystem::remove(SessionFile(), ec);
+}
+
+void RestartGame() {
+    SdCard::Shutdown();  // what the game wrote on the SD card goes back into UserData/SD first
+    RestartProcess();
 }
 
 void EndSession() {

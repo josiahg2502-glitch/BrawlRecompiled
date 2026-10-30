@@ -22,38 +22,42 @@ Rendered at 4K (shown here at 1080p).
 | ![Castle Siege](screenshots/06_castle_siege_2.jpg) | ![The Subspace Emissary: Kirby](screenshots/07_subspace_kirby.jpg) |
 | ![The Subspace Emissary: Kirby vs Mario](screenshots/08_subspace_vs.jpg) | ![The Subspace Emissary's first battle](screenshots/09_subspace_battle.jpg) |
 | ![REX's roster](screenshots/10_rex_roster.jpg) | ![A REX match: Ivysaur vs Incineroar](screenshots/11_rex_match.jpg) |
+| ![The options menu](screenshots/12_options_menu.jpg) | ![Save states and fast-forward](screenshots/13_save_states_fast_forward.jpg) |
+| ![Cheats](screenshots/14_cheats.jpg) | ![The giant fighters cheat](screenshots/16_giant_fighters_cheat.jpg) |
+
+![Battlefield on a 32:9 screen: more of the stage, the HUD kept in the middle](screenshots/15_ultrawide_32x9.jpg)
 
 ## Features
 
-- Up to 4K, and the game's own 16:9 mode (plus fill-the-window for ultrawide)
-- 120 fps frame interpolation, on by default (it shows on displays faster than 60 Hz; game speed is unchanged)
-- Every gamepad is a GameCube controller (Xbox, PlayStation and Nintendo layouts), the keyboard too; real Wii
-  Remotes over Bluetooth
-- A launcher that installs the game from your own disc image (.iso, .ciso, .wbfs), with the display, controller
-  and mod settings, and Wii / Dolphin save import; it uses the game's own title font, fighters and Smash Ball, taken from your
-  disc when the release is built (`tools/make_launcher_art.py`)
-- Keyboard and mouse controls for player 1, set up in the launcher or the game's F10 menu
+- Up to 4K and beyond (render resolution up to 8x), the game's own 16:9, and Fill Window for ultrawide screens up
+  to 32:9: more of the stage to the sides, menus and HUD kept in proportion
+- 120 fps frame interpolation, on by default (180 and 240 too; the game itself runs at 60)
+- An options menu inside the game, in Brawl's own style (F10, or Home on a controller): graphics, audio,
+  controls, gameplay, cheats, mods, online play and updates. No separate launcher: the game starts straight away
+- Save states (F5 / F7, three slots), fast-forward (F8, 2x to 4x) and fast menus
+- Cheats: Gecko codes in Dolphin's format, switched on and off while you play; nine tested codes come with it
+- Every gamepad is a GameCube controller, with its buttons remappable in the game (Nintendo or by-position
+  layouts); keyboard and mouse for any player; real Wii Remotes over Bluetooth
+- Installs from your own disc image (.iso, .ciso, .wbfs) or an already extracted game folder, and updates itself
 - Saves in `UserData\NAND`, compatible in layout with a Wii's
 - A virtual SD card (`UserData\SD`), so the game's own SD features and SD-based mods work
-- Gecko codes and Project+-style mods (in progress, see below)
+- Gecko codes and Project+-style mods (see below)
 - Online play between Brawl Recompiled players (see below)
-- Windows and Linux
+- Windows (with a build for processors without AVX2) and Linux / Steam Deck
 
 **No game data is included**: the game's files are read from your own copy of the game.
-
-![The launcher](screenshots/launcher.png)
 
 ## Mods
 
 Brawl mods are installed the way they are on a Wii's SD card:
 
 - **The SD card** is the folder `Play\UserData\SD`. Copy a mod's SD card contents into it (for Project+: the
-  `Project+`, `private` and `apps` folders from the Wii download). At start the game gets a card image built from
-  that folder the way Dolphin builds one (FAT32, the contents plus 512 MiB to 8 GiB of free space;
-  `UserData\Cache\sd_card.raw`, rebuilt only when the folder changes); files the game writes to the card are
-  copied back into the folder when it exits. A card over 2 GiB is an SDHC card, which Brawl reads only with a
+  `Project+`, `private` and `apps` folders from the Wii download). At start the game gets a FAT32 card
+  (`UserData\Cache\sd_card.raw`, rebuilt only when the folder changes) whose files are read straight from that
+  folder, so a mod takes no extra disk space; files the game writes to the card go back into the folder when it
+  exits. A card over 2 GiB is an SDHC card, which Brawl reads only with a
   mod's SDHC support (Project+ has it). A Dolphin `sd.raw` placed at `UserData\sd.raw` is used directly instead.
-- **Gecko codes**: the `RSBE01.GCT` of the card folder chosen on the launcher's Mods page ("Build to play",
+- **Gecko codes**: the `RSBE01.GCT` of the card folder chosen in Options > Mods ("Build to play",
   `[mods] sd_codes` in `Config.toml`), else the first folder with one (`UserData\SD\Project+\RSBE01.GCT`), else
   `UserData\Codes\RSBE01.gct`, is installed with USB Loader GX's code handler, honouring a `gc.txt` beside it
   (code list address, hook type, pokes) exactly as the mods' own loaders do: the handler runs once before the
@@ -74,14 +78,13 @@ its Wii (console / "hackless") download into `UserData\SD` as the folder named h
 | Brawl Minus 5.1.5 | `Minusery` | [brawlminus.net](https://brawlminus.net/) (Console zip) |
 | Legacy XP 2.11 | `LegacyXP` | [unofficialsmashlegacy.weebly.com](https://unofficialsmashlegacy.weebly.com/legacy-xp.html) (Wii) |
 
-Only that folder is needed (the downloads' `apps`, `private`, `codes` and loader files are for a real Wii). The
-card image grows with what is in the folder (REX alone is 8 GB), so the first start after adding a build takes a
-few minutes while it is built (the title card shows how far it is). Costumes, stages and movesets from [Brawl Vault](https://forums.kc-mm.com/Gallery/)
+Only that folder is needed (the downloads' `apps`, `private`, `codes` and loader files are for a real Wii). Setting
+up the card after adding a build takes seconds (the title card shows it). Costumes, stages and movesets from [Brawl Vault](https://forums.kc-mm.com/Gallery/)
 install into a build's `pf` folder exactly as on a Wii.
 
 ## Online play
 
-Press **F9** in the game (or use **Online** in the launcher):
+Press **F9** in the game (or Options > Online):
 
 - **Host a room** for 2 to 4 players: list it publicly, or keep it to friends, who join with its 5-letter room code.
 - **Find rooms** shows public rooms, rooms on your network and rooms over [Tailscale](https://tailscale.com).

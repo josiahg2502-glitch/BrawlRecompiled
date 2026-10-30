@@ -19,6 +19,9 @@ bool TakePendingSession(NetplaySession::Config& config, int& saveFile);
 // The players' names in the running session, by slot.
 const std::vector<std::string>& SessionNames();
 
+// Starts the game again (the options menu, after a change that needs it). Does not return.
+[[noreturn]] void RestartGame();
+
 // Leaves the session: restarts the game normally (the host keeps the session's save).
 void EndSession();
 // The part of EndSession that keeps the host's save and forgets the session, for a front end that

@@ -18,6 +18,7 @@ cp "$build/usa/build/_deps/png-build/libpng16.so.16" "$engine/"   # the one libr
 cp -L "$build/sdl-shared/libSDL3.so.0" "$engine/"                 # the launcher's controller list
 cp "$build/usa/build/dsp_coef.bin" "$build/usa/build/cacert.pem" "$root/Play/portable.txt" "$engine/"
 cp -r "$root/Play/wii_bootstrap" "$engine/"
+cp "$root/tools/cheats-RSBE01.ini" "$engine/default-cheats.ini"   # the starter cheat list (gecko.cpp copies it into UserData)
 mkdir -p "$engine/startup" && cp "$root/launcher/art/smash_ball.png" "$engine/startup/"   # the title card's Smash Ball
 cp "$root/tools/CREDITS.txt" "$stage/CREDITS.txt"
 cp "$root/wiicompiled/LICENSE" "$stage/LICENSE.txt"
