@@ -248,7 +248,16 @@ void MarkStackTop(void* top) { g_fibers[HostContext::Current()].top = static_cas
 }
 
 [[gnu::noinline]] void SwitchFiber(void* target) {
-    if (__builtin_setjmp(g_fibers[HostContext::Current()].jmp) == 0) SwitchBelow(target);
+    void** jmp = g_fibers[HostContext::Current()].jmp;
+    if (__builtin_setjmp(jmp) == 0) {
+#if defined(__x86_64__) && defined(_WIN32)
+        // Win64: the frame address __builtin_setjmp keeps is rbp minus the SEH frame offset, but the resume path reloads
+        // xmm6-15 relative to rbp, so it read them from below this frame and every resumed thread lost them (the
+        // x86-64-v2 build kept guest r14-r29 there across native OS calls). Resume with the real rbp.
+        asm volatile("movq %%rbp, %0" : "=m"(jmp[0]));
+#endif
+        SwitchBelow(target);
+    }
 }
 
 void FrameBoundary() {
