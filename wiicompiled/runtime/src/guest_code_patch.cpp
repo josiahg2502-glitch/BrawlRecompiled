@@ -59,6 +59,19 @@ bool IsGuardedLocked(uint32_t address) {
                        [&](const auto& range) { return address >= range.first && address < range.second; });
 }
 
+// A page holding some guarded code. An edge page (code and data, e.g. a module's first code page after its header)
+// is guarded too: REX hooks sora_menu_sel_stage's constructor there, and unguarded the translated original ran.
+bool IsGuardedPageLocked(uint32_t page) {
+    return std::any_of(g_ranges.begin(), g_ranges.end(),
+                       [&](const auto& range) { return page < range.second && page + kPage > range.first; });
+}
+
+bool IsEdgePageLocked(uint32_t page) {
+    return IsGuardedPageLocked(page) &&
+           std::none_of(g_ranges.begin(), g_ranges.end(),
+                        [&](const auto& range) { return page >= range.first && page + kPage <= range.second; });
+}
+
 // The translated function holding `address`: the last start at or below it.
 int64_t FunctionIndex(uint32_t address) {
     const uint32_t* begin = g_mkwGuardedFunctionStarts;
@@ -146,13 +159,17 @@ bool NoteWrite(uint32_t address) {
     if (!Active()) return false;
     address = Cached(address);
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!IsGuardedLocked(address)) return false;
+    if (!IsGuardedPageLocked(address & ~(kPage - 1))) return false;
     g_dirty.insert(address & ~(kPage - 1));
     g_anyDirty.store(true, std::memory_order_release);
     return true;
 }
 
-void Sync() {
+namespace {
+
+// An edge page's data stores would trap again after every Sync (and Sync follows every patched call): it stays open,
+// compared at each Sync, until the frame's SyncFrame guards it again.
+void SyncPages(bool frame) {
     if (!g_anyDirty.load(std::memory_order_acquire)) return;
     std::vector<uint32_t> pages;
     {
@@ -160,7 +177,10 @@ void Sync() {
         if (g_dirty.empty()) return;
         pages.assign(g_dirty.begin(), g_dirty.end());
         g_dirty.clear();
-        g_anyDirty.store(false, std::memory_order_release);
+        for (const uint32_t page : pages) {
+            if (!frame && IsEdgePageLocked(page)) g_dirty.insert(page);
+        }
+        g_anyDirty.store(!g_dirty.empty(), std::memory_order_release);
         for (const uint32_t page : pages) {
             const auto found = g_pristine.find(page);
             if (found == g_pristine.end() || !Memory::Contains(page, kPage)) continue;
@@ -191,9 +211,19 @@ void Sync() {
                 MarkInliningCallers(static_cast<uint32_t>(index));
             }
         }
+        if (!frame) {
+            pages.erase(std::remove_if(pages.begin(), pages.end(), [](uint32_t page) { return IsEdgePageLocked(page); }),
+                        pages.end());
+        }
     }
     for (const uint32_t page : pages) GuestFlat::ReprotectExecutablePage(page);
 }
+
+} // namespace
+
+void Sync() { SyncPages(false); }
+
+void SyncFrame() { SyncPages(true); }
 
 void ResetPristine(uint32_t start, uint32_t end) {
     {
@@ -233,8 +263,7 @@ void Reapply(uint32_t start, uint32_t end) {
         std::lock_guard<std::mutex> lock(g_mutex);
         for (const auto& [address, value] : g_sites) {
             if (address >= start && address < end) writes.emplace_back(address, value);
-        }
-    }
+        }    }
     if (writes.empty()) return;
     for (const auto& [address, value] : writes) {  // through the write trap, as the code handler's own stores go
         std::memcpy(Memory::GetPointer(address, 4), &value, 4);

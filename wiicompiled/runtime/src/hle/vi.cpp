@@ -902,7 +902,7 @@ static void LogWatchedWords() {
 void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
     SamplingProfilerAttachCurrentThread();
     LogWatchedWords();
-    GuestCodePatch::Sync();  // code patches made outside the code handler (mod plugins)
+    GuestCodePatch::SyncFrame();  // code patches made outside the code handler (mod plugins)
     if (s_presentSequenceActive.exchange(true, std::memory_order_acq_rel)) {
         return;
     }

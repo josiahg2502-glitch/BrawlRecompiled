@@ -365,10 +365,10 @@ void ApplyExecutableProtectionLocked() {
     if (g_base == nullptr || RequiresCheckedAccess()) return;
     auto& protectedPages = ExecutableProtectedPages();
     for (const auto& range : ExecutableRanges()) {
-        // Only pages fully inside the range are protected: edge pages often share a page with data
-        // (MKW's THP buffers do), so guarding them would fault legitimate stores; their writes still go through the checked path.
-        const uint64_t first = RoundUp(range.start, kHostPageSize);
-        const uint64_t last = static_cast<uint64_t>(range.end) & ~(kHostPageSize - 1u);
+        // Edge pages too (code and data): GuestCodePatch keeps one open after a data store until the next frame, so
+        // its data costs a fault a frame at most, and a mod's hook written there by a plain store is still seen.
+        const uint64_t first = static_cast<uint64_t>(range.start) & ~(kHostPageSize - 1u);
+        const uint64_t last = RoundUp(range.end, kHostPageSize);
         if (last <= first) continue;
         for (uint64_t page = first; page < last; page += kHostPageSize) {
             const uint32_t pageIndex = static_cast<uint32_t>(page >> 12);
@@ -783,7 +783,7 @@ void ReprotectExecutablePage(uint32_t address) {
     std::lock_guard<std::mutex> lock(StateMutex());
     const uint64_t page = static_cast<uint64_t>(address) & ~(kHostPageSize - 1u);
     const bool inside = std::any_of(ExecutableRanges().begin(), ExecutableRanges().end(), [&](const GuardedRange& range) {
-        return page >= RoundUp(range.start, kHostPageSize) && page + kHostPageSize <= range.end;
+        return page < range.end && page + kHostPageSize > range.start;
     });
     const uint32_t pageIndex = static_cast<uint32_t>(page >> 12);
     if (inside && ExecutableProtectedPages()[pageIndex] == 0 && ProtectRange(g_base + page, kHostPageSize, kProtRead)) {

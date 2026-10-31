@@ -13,10 +13,12 @@ namespace GuestCodePatch {
 
 // Write-traps the translated code in [start, end); its current bytes are the pristine state.
 void Protect(uint32_t start, uint32_t end, const char* name);
-// The trap's report of a write to guarded code. False when the address is not code guarded here.
+// The trap's report of a write to a page holding guarded code. False when the page holds none.
 bool NoteWrite(uint32_t address);
 // Compares written pages with their pristine bytes; functions whose code changed go to the interpreter.
 void Sync();
+// Sync, once a frame: also guards again the pages that hold both code and data.
+void SyncFrame();
 // [start, end) holds its pristine code again (a module was linked again at its home).
 void ResetPristine(uint32_t start, uint32_t end);
 // A patch a mod made to code not guarded yet (the code handler's boot pass over a resident module): `value` is the
