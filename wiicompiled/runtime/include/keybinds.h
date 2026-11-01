@@ -3,9 +3,9 @@
 #include <cstddef>
 #include <string>
 
-// NSMBW: the keyboard's sideways Wii Remote, one or two keys per control, changeable from the
-// game's settings window (Keybinds tab) and saved to Config.toml's [keyboard] table as SDL
-// scancode names ("jump = \"X,Space\"").
+// The keyboard's sideways Wii Remote, one or two keys per control, changeable from the game's
+// settings window (F10 > Controls, with the keyboard playing as a Wii Remote) and saved to
+// Config.toml's [keyboard] table as SDL scancode names ("jump = \"P,Space\"").
 namespace Keybinds {
 
 enum Action : int {
@@ -21,6 +21,8 @@ enum Action : int {
     kTiltRight,
     kPlus,
     kMinus,
+    kB,
+    kHome,
     kActionCount,
 };
 
@@ -38,6 +40,8 @@ int Capturing();
 bool PollCapture();
 // Keys held from a capture are ignored until they are released.
 bool Suppressed();
+// Binds `action` to `code` alone, or to no key for SDL_SCANCODE_UNKNOWN, and saves it.
+void Bind(int action, int code);
 void ResetDefaults();
 
 } // namespace Keybinds

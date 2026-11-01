@@ -205,6 +205,26 @@ void ControlsRows(std::vector<MenuRow>& rows) {
                         PADSerializeMappings();
                     }});
     if (keys != nullptr) {
+        const bool remote = VirtualRemote::KeyboardIsRemote();
+        rows.push_back({"Keyboard plays as", remote ? "WII REMOTE SIDEWAYS" : "GAMECUBE CONTROLLER",
+                        "Wii Remote: Brawl's own sideways controls (double tap to run, direction with attack for a smash). "
+                        "GameCube controller: the keys tilt an analog stick.",
+                        [remote](int) { VirtualRemote::SetKeyboardIsRemote(!remote); }});
+        if (remote) {
+            for (int action = 0; action < Keybinds::kActionCount; ++action) {
+                if (action == Keybinds::kTiltLeft || action == Keybinds::kTiltRight) continue;  // Brawl never reads tilt
+                const bool waiting = g_rebind.active && g_rebind.kind == RebindKind::RemoteKey && g_rebind.target == action;
+                rows.push_back({std::string("Key: ") + Keybinds::ActionName(action),
+                                waiting ? "PRESS A KEY..." : Keybinds::KeyLabel(action), "A or Enter, then press a key.",
+                                [action](int step) {
+                                    if (step == 0) BeginRebind(RebindKind::RemoteKey, static_cast<uint16_t>(action), Keybinds::ActionName(action));
+                                }});
+            }
+            rows.push_back({"Reset Wii Remote keys", "", "Back to WASD, P, O, I, U, 1 and Backspace.", [](int step) {
+                                if (step == 0) Keybinds::ResetDefaults();
+                            }});
+            return;
+        }
         for (uint32_t i = 0; i < keyCount; ++i) {
             const auto binding = keys[i];
             rows.push_back({std::string("Key: ") + PADGetButtonName(binding.padButton), KeyBindingName(binding.scancode),
@@ -600,8 +620,9 @@ void DrawOptionsMenu() {
         MK::Plate(c, -470, -232, 470, -200, 0x10131FFFu, 8.0f);
         const bool flashing = ImGui::GetTime() < g_menu.flashUntil && !g_menu.flash.empty();
         if (g_rebind.active) {
-            hint = g_rebind.kind == RebindKind::Controller ? "Press the controller button for " + g_rebind.label + "."
-                                                           : "Press a key or click a mouse button for " + g_rebind.label + ". Backspace clears it.";
+            hint = g_rebind.kind == RebindKind::Controller  ? "Press the controller button for " + g_rebind.label + "."
+                   : g_rebind.kind == RebindKind::RemoteKey ? "Press a key for " + g_rebind.label + "."
+                                                            : "Press a key or click a mouse button for " + g_rebind.label + ". Backspace clears it.";
         }
         // Up to two lines under the rows (a cheat's notes can be long).
         const auto lines = GameLayout::WrapText(*MK::MenuFont(), GameLayout::Utf16(flashing ? g_menu.flash : hint), 15, 600);

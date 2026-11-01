@@ -33,6 +33,7 @@ extern "C" uint8_t* aurora_load_png_rgba(const char* path, uint32_t* width, uint
 #include "memory.h"
 #include "generated/RuntimeConfig.h"
 #include "wii_remote_input.h"
+#include "virtual_remote.h"
 
 #include <imgui.h>
 #include <SDL3/SDL_dialog.h>
@@ -543,7 +544,7 @@ const char* KeyBindingName(int scancode) {
     }
 }
 
-enum class RebindKind { KeyboardButton, KeyboardAxis, Controller, MuteHotkey };
+enum class RebindKind { KeyboardButton, KeyboardAxis, Controller, MuteHotkey, RemoteKey };
 struct RebindState {
     bool active = false;
     bool openPopup = false;
@@ -614,6 +615,11 @@ void CompleteRebind(uint32_t value) {
         RuntimeConfigFile::SetMuteHotkey(g_muteHotkey);
         g_rebind.active = false;
         return;
+    } else if (capture.kind == RebindKind::RemoteKey) {
+        // A key, or nothing (clearing one of the keyboard Wii Remote's controls keeps its key).
+        if (static_cast<int32_t>(value) > SDL_SCANCODE_UNKNOWN) Keybinds::Bind(capture.target, static_cast<int>(value));
+        g_rebind.active = false;
+        return;
     } else if (capture.kind == RebindKind::KeyboardButton) {
         PADSetKeyButtonBinding(capture.port, {static_cast<int32_t>(value), capture.target});
     } else {
@@ -639,7 +645,7 @@ void PollRebind(bool overControl, bool clear = false) {
         }
         const uint32_t mouse = SDL_GetMouseState(nullptr, nullptr);
         for (int i = 1; i <= 5 && g_rebind.active; ++i)
-            if (!overControl && g_rebind.kind != RebindKind::MuteHotkey &&
+            if (!overControl && g_rebind.kind != RebindKind::MuteHotkey && g_rebind.kind != RebindKind::RemoteKey &&
                 (mouse & ~g_rebind.mouse & (1u << (i - 1))) != 0) CompleteRebind(static_cast<uint32_t>(-i - 1));
         g_rebind.mouse = mouse;
     } else if (g_rebind.active && SDL_GetKeyboardFocus() != nullptr && g_rebind.kind == RebindKind::Controller) {
@@ -673,7 +679,7 @@ void DrawRebindPrompt() {
         ImGui::Text("Rebind: %s", g_rebind.label.c_str());
         ImGui::TextUnformatted(g_rebind.kind == RebindKind::Controller
             ? "Press a controller button, pull a trigger, or move a stick."
-            : g_rebind.kind == RebindKind::MuteHotkey
+            : g_rebind.kind == RebindKind::MuteHotkey || g_rebind.kind == RebindKind::RemoteKey
                 ? "Press a keyboard key."
                 : "Press a keyboard key or click a mouse button.");
         ImGui::TextUnformatted("Release any held input first. Backspace or Delete clears the mapping.");
@@ -1969,8 +1975,9 @@ void HandleEvents(const AuroraEvent* events) noexcept {
             continue;
         }
         controller_mapping_wizard::HandleSdlEvent(ev->sdl);
-        if (g_rebind.active && (IsToggleKey(ev->sdl, SDL_SCANCODE_BACKSPACE) ||
-                                IsToggleKey(ev->sdl, SDL_SCANCODE_DELETE))) {
+        // (Backspace is a key like any other for the keyboard Wii Remote: its + by default.)
+        if (g_rebind.active && g_rebind.kind != RebindKind::RemoteKey &&
+            (IsToggleKey(ev->sdl, SDL_SCANCODE_BACKSPACE) || IsToggleKey(ev->sdl, SDL_SCANCODE_DELETE))) {
             CompleteRebind(g_rebind.kind == RebindKind::Controller ? PAD_NATIVE_BUTTON_DISABLED
                                                                   : static_cast<uint32_t>(PAD_KEY_INVALID));
         }

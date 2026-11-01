@@ -14,24 +14,28 @@ namespace {
 
 struct Default {
     const char* key;   // Config.toml [keyboard] key
-    const char* name;  // shown in the Keybinds tab
+    const char* name;  // shown in the settings menu
     std::vector<SDL_Scancode> codes;
 };
 
+// Brawl's sideways remote with a hand on each side of the keyboard: WASD moves, P attacks (2), O is the special (1),
+// I shields (B), U grabs (-), 1 taunts (A).
 const std::array<Default, kActionCount>& Defaults() {
     static const std::array<Default, kActionCount> defaults = {{
-        {"up", "Up", {SDL_SCANCODE_UP}},
-        {"down", "Down", {SDL_SCANCODE_DOWN}},
-        {"left", "Left", {SDL_SCANCODE_LEFT}},
-        {"right", "Right", {SDL_SCANCODE_RIGHT}},
-        {"jump", "Jump (2)", {SDL_SCANCODE_X, SDL_SCANCODE_SPACE}},
-        {"run", "Run / Fire (1)", {SDL_SCANCODE_Z, SDL_SCANCODE_LSHIFT}},
-        {"a", "A", {SDL_SCANCODE_A}},
-        {"shake", "Shake (Spin)", {SDL_SCANCODE_C, SDL_SCANCODE_LCTRL}},
-        {"tilt_left", "Tilt Left", {SDL_SCANCODE_Q}},
-        {"tilt_right", "Tilt Right", {SDL_SCANCODE_E}},
-        {"plus", "+ (Pause)", {SDL_SCANCODE_RETURN, SDL_SCANCODE_ESCAPE}},
-        {"minus", "- (Minus)", {SDL_SCANCODE_MINUS, SDL_SCANCODE_TAB}},
+        {"up", "Up", {SDL_SCANCODE_W}},
+        {"down", "Down", {SDL_SCANCODE_S}},
+        {"left", "Left", {SDL_SCANCODE_A}},
+        {"right", "Right", {SDL_SCANCODE_D}},
+        {"jump", "2 (Attack)", {SDL_SCANCODE_P}},
+        {"run", "1 (Special)", {SDL_SCANCODE_O}},
+        {"a", "A (Taunt)", {SDL_SCANCODE_1}},
+        {"shake", "Shake", {}},
+        {"tilt_left", "Tilt Left", {}},
+        {"tilt_right", "Tilt Right", {}},
+        {"plus", "+ (Pause)", {SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_RETURN}},
+        {"minus", "- (Grab)", {SDL_SCANCODE_U}},
+        {"b", "B (Shield)", {SDL_SCANCODE_I}},
+        {"home", "Home", {}},
     }};
     return defaults;
 }
@@ -186,6 +190,20 @@ bool Suppressed() {
         g_suppress = false;
     }
     return g_capturing >= 0 || g_suppress;
+}
+
+void Bind(int action, int code) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    LoadLocked();
+    if (action < 0 || action >= kActionCount) {
+        return;
+    }
+    g_codes[action].clear();
+    if (code > SDL_SCANCODE_UNKNOWN && code < SDL_SCANCODE_COUNT) {
+        g_codes[action].push_back(static_cast<SDL_Scancode>(code));
+    }
+    SaveLocked(action);
+    g_suppress = true;
 }
 
 void ResetDefaults() {

@@ -32,8 +32,8 @@ namespace {
 
 // WPAD_BUTTON_* bits as the game reads them from KPADStatus.hold.
 constexpr uint32_t kWpadLeft = 0x0001, kWpadRight = 0x0002, kWpadDown = 0x0004, kWpadUp = 0x0008,
-                   kWpadPlus = 0x0010, kWpadTwo = 0x0100, kWpadOne = 0x0200, kWpadA = 0x0800,
-                   kWpadMinus = 0x1000;
+                   kWpadPlus = 0x0010, kWpadTwo = 0x0100, kWpadOne = 0x0200, kWpadB = 0x0400, kWpadA = 0x0800,
+                   kWpadMinus = 0x1000, kWpadHome = 0x8000;
 
 // The remote's D-pad by screen direction. Held sideways with the D-pad under the left thumb, the
 // pad's "up" arrow points left, "right" points up, "down" points right and "left" points down.
@@ -131,6 +131,8 @@ Intent KeyboardIntent() {
     if (Held(Keybinds::kA)) intent.buttons |= kWpadA;
     if (Held(kPlus)) intent.buttons |= kWpadPlus;
     if (Held(kMinus)) intent.buttons |= kWpadMinus;
+    if (Held(Keybinds::kB)) intent.buttons |= kWpadB;
+    if (Held(kHome)) intent.buttons |= kWpadHome;
     intent.shake = Held(kShake);
     intent.tilt = (Held(kTiltRight) ? 1.0f : 0.0f) - (Held(kTiltLeft) ? 1.0f : 0.0f);
     return intent;
@@ -169,9 +171,11 @@ constexpr const char* kPadDefaults[Keybinds::kActionCount][kPadStyleCount] = {
     {"", "", ""},
     {"start", "start", "start"},
     {"back,leftshoulder,lefttrigger", "back,touchpad,leftshoulder,lefttrigger", "back,leftshoulder,lefttrigger"},
+    {"", "", ""},  // B and Home: the keyboard's only
+    {"", "", ""},
 };
 constexpr const char* kPadActionKeys[Keybinds::kActionCount] = {
-    "up", "down", "left", "right", "jump", "run", "a", "shake", "tilt_left", "tilt_right", "plus", "minus",
+    "up", "down", "left", "right", "jump", "run", "a", "shake", "tilt_left", "tilt_right", "plus", "minus", "b", "home",
 };
 
 std::vector<PadInput> ParsePadInputs(const std::string& text) {
@@ -413,14 +417,33 @@ void SetTouchState(uint32_t touchButtons, bool shake, float tilt) {
     g_touchTilt.store(std::isfinite(tilt) ? tilt : 0.0f, std::memory_order_relaxed);
 }
 
+// -1 until read from Config.toml.
+std::atomic<int> g_keyboardRemote{-1};
+
+bool KeyboardIsRemote() {
+    int value = g_keyboardRemote.load(std::memory_order_relaxed);
+    if (value < 0) {
+        value = RuntimeConfigFile::KeyboardBinding("controller") == "wii_remote" ? 1 : 0;
+        g_keyboardRemote.store(value, std::memory_order_relaxed);
+    }
+    return value == 1;
+}
+
+void SetKeyboardIsRemote(bool remote) {
+    g_keyboardRemote.store(remote ? 1 : 0, std::memory_order_relaxed);
+    RuntimeConfigFile::SetKeyboardBinding("controller", remote ? "wii_remote" : "gamecube");
+}
+
 bool Present(uint32_t chan) {
     if (chan >= PAD_MAX_CONTROLLERS) {
         return false;
     }
-    // Brawl: the keyboard and gamepads are GameCube controllers (PADRead), the game's main input; standing in for
-    // a Wii Remote as well would give every press twice. Real Wii Remotes still connect over Bluetooth.
-    (void)chan;
-    return false;
+    // Brawl: gamepads are GameCube controllers (PADRead), the game's main input, and so is the keyboard unless
+    // the player picked the Wii Remote for it. Then the port the keyboard plays is a sideways Wii Remote instead
+    // (WiiRemoteInput::HideRemotesFromPad takes its GameCube controller away), never both: that would give every
+    // press twice. Real Wii Remotes still connect over Bluetooth.
+    uint32_t count = 0;
+    return KeyboardIsRemote() && PADGetKeyButtonBindings(chan, &count) != nullptr;
 }
 
 // The Wii Remote's IR pointer. SPM reads KPAD pos / dpd_valid_fg straight from wpadmgr for Tippi's pointer, item
@@ -517,12 +540,26 @@ void UpdatePointer(WiiRemoteInput::KpadSample& sample) {
 }
 
 bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
-    // No stand-in remote on this port (Brawl: gamepads and the keyboard are GameCube controllers): reading one here
-    // would hand the game the same gamepad again as Wii Remote 1, so one pad drove both P1 and P2.
+    // No stand-in remote on this port (Brawl: gamepads, and the keyboard unless it plays as a Wii Remote, are
+    // GameCube controllers): reading one here would hand the game the same gamepad again as Wii Remote 1, so one
+    // pad drove both P1 and P2.
     if (chan >= PAD_MAX_CONTROLLERS || !Present(chan)) {
         return false;
     }
     std::lock_guard<std::mutex> lock(g_mutex);
+    // Brawl: the keyboard alone, on its own layout (Keybinds). The pad, gamepad, touch and pointer sources below
+    // are NSMBW's and SPM's; Present() is true here only for the keyboard's port.
+    if (KeyboardIsRemote()) {
+        if (!g_announced[chan]) {
+            g_announced[chan] = true;
+            RT_LOGF(RT_TAG_RUNTIME, "player %u: keyboard as a sideways Wii Remote\n", chan + 1);
+        }
+        const Intent keys = KeyboardIntent();
+        sample = {};
+        sample.hold = keys.buttons;
+        ApplyMotion(g_motion[chan], keys, sample);
+        return true;
+    }
     RefreshPadsLocked();
     // Player 1 reads every gamepad straight from SDL (GamepadIntent); the pad route serves players 2-4.
     const bool pad = chan != 0 && g_pads[chan].err == PAD_ERR_NONE;
