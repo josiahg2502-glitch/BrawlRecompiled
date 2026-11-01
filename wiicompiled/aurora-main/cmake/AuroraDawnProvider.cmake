@@ -247,6 +247,19 @@ elseif (_aurora_dawn_provider STREQUAL "package")
       "The package must be a Dawn install tree built with DAWN_ENABLE_INSTALL=ON.")
   endif ()
 
+  # The Android package was built on a CI machine and names that machine's NDK liblog.so by its absolute path;
+  # link the NDK's log library by name instead, from whichever NDK this build uses.
+  if (ANDROID)
+    get_directory_property(_dawn_imported IMPORTED_TARGETS)
+    foreach (_t IN LISTS _dawn_imported)
+      get_target_property(_libs ${_t} INTERFACE_LINK_LIBRARIES)
+      if (_libs AND _libs MATCHES "/liblog\\.so")
+        string(REGEX REPLACE "[^;<>:$]*/liblog\\.so" "log" _libs "${_libs}")
+        set_target_properties(${_t} PROPERTIES INTERFACE_LINK_LIBRARIES "${_libs}")
+      endif ()
+    endforeach ()
+  endif ()
+
   _aurora_dawn_set_platform_backends()
 
   get_target_property(_dawn_pkg_type dawn::webgpu_dawn TYPE)

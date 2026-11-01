@@ -1,4 +1,4 @@
-package com.wither.nsmbw;
+package com.brawlrecompiled;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -12,7 +12,7 @@ import android.util.Log;
  * while playing, and the app keeps those choices.
  */
 final class SettingsMenu {
-    private static final String TAG = "NSMBW";
+    private static final String TAG = "BrawlRecompiled";
 
     private final Activity activity;
     private final AppSettings settings;
@@ -52,7 +52,6 @@ final class SettingsMenu {
             "Render Resolution: " + AppSettings.resolutionLabel(settings.resolutionScale()),
             "FPS Counter: " + (settings.showFps() ? "On" : "Off"),
             "Frametime Graph: " + (settings.frameGraph() ? "On" : "Off"),
-            "Spinning Coins: " + (settings.spinningCoins() ? "On" : "Off"),
             "Graphics Compatibility: " + gpuCompatLabel(settings.gpuCompat()),
         };
         new AlertDialog.Builder(activity)
@@ -62,7 +61,6 @@ final class SettingsMenu {
                     else if (which == 1) showResolutionChoice();
                     else if (which == 2) { settings.setShowFps(!settings.showFps()); save(); showDisplayMenu(); }
                     else if (which == 3) { settings.setFrameGraph(!settings.frameGraph()); save(); showDisplayMenu(); }
-                    else if (which == 4) { settings.setSpinningCoins(!settings.spinningCoins()); save(); showDisplayMenu(); }
                     else showGpuCompatChoice();
                 })
                 .setNegativeButton("Back", (dialog, which) -> showMain())
@@ -166,8 +164,6 @@ final class SettingsMenu {
         final String[] items = {
             "Touch Controls: " + (settings.touchControls() ? "On" : "Off"),
             "Touch Control Opacity: " + Math.round(settings.touchOpacity() * 100) + "%",
-            "Tilt (turn the phone): " + (settings.motionTilt() ? "On" : "Off"),
-            "Shake (jolt the phone): " + (settings.motionShake() ? "On" : "Off"),
             "Vibration: " + (settings.haptics() ? "On" : "Off"),
         };
         new AlertDialog.Builder(activity)
@@ -180,8 +176,6 @@ final class SettingsMenu {
                             settings.setTouchOpacity(Math.min(1f, next));
                             break;
                         }
-                        case 2: settings.setMotionTilt(!settings.motionTilt()); break;
-                        case 3: settings.setMotionShake(!settings.motionShake()); break;
                         default: settings.setHaptics(!settings.haptics()); break;
                     }
                     showControlsMenu();

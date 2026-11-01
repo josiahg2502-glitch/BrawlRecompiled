@@ -1,4 +1,4 @@
-package com.wither.nsmbw;
+package com.brawlrecompiled;
 
 import android.app.AlertDialog;
 import android.content.Context;
@@ -20,14 +20,16 @@ import org.libsdl.app.SDLActivity;
 
 /**
  * The game: SDL's activity running libmain.so (the translated game, its runtime, SDL and Dawn,
- * linked into one library), with the on-screen remote and the phone's motion on top.
+ * linked into one library), with the on-screen GameCube controller on top.
  */
 public final class GameActivity extends SDLActivity
-        implements TouchControlsView.Listener, MotionInput.Listener {
-    private static final String TAG = "NSMBW";
+        implements TouchControlsView.Listener {
+    private static final String TAG = "BrawlRecompiled";
 
-    /** Player 1's on-screen remote and motion (runtime/src/android/android_bridge.cpp). */
-    static native void nativeSetTouchState(int buttons, boolean shake, float tilt);
+    /** Player 1's on-screen GameCube controller: PAD bits and the stick, -1..1 with y up (android_bridge.cpp). */
+    static native void nativeSetTouchPad(int buttons, float stickX, float stickY);
+    /** Whether the on-screen controller is shown; port 1 then always reports a controller. */
+    static native void nativeSetTouchPadEnabled(boolean enabled);
 
     /** The Display menu: aspect, render scale (480 lines per 1x), FPS counter (DisplaySettings). */
     static native void nativeApplyDisplaySettings(int aspect, float renderScale, boolean showFps);
@@ -53,11 +55,7 @@ public final class GameActivity extends SDLActivity
     private AppSettings settings;
     private boolean bootWidescreen;  // the game reads 4:3 versus widescreen once, when it starts
     private TouchControlsView touch;
-    private MotionInput motion;
     private boolean nativeReady;
-    private int touchButtons;
-    private boolean touchShake, motionShake;
-    private float motionTilt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,7 +79,7 @@ public final class GameActivity extends SDLActivity
         // LAN rooms are found with broadcasts, which many Wi-Fi drivers drop unless an app holds this.
         final WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wifi != null) {
-            multicastLock = wifi.createMulticastLock("nsmbw-lan");
+            multicastLock = wifi.createMulticastLock("brawl-lan");
             multicastLock.setReferenceCounted(false);
             multicastLock.acquire();
         }
@@ -92,7 +90,6 @@ public final class GameActivity extends SDLActivity
         applyControlSettings();
         addContentView(touch, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        motion = new MotionInput(this, this);
     }
 
     /** SDL is linked into libmain.so, so that one library is all there is to load. */
@@ -116,7 +113,6 @@ public final class GameActivity extends SDLActivity
                     settings.setResolutionScale(changed[0]);
                     settings.setShowFps(changed[1] > 0.5f);
                     if (changed.length > 2) settings.setAspectMode(Math.round(changed[2]));
-                    if (changed.length > 3) settings.setSpinningCoins(changed[3] > 0.5f);
                     if (changed.length > 4) settings.setFrameGraph(changed[4] > 0.5f);
                 }
             }
@@ -141,15 +137,11 @@ public final class GameActivity extends SDLActivity
         menuPoll.removeCallbacks(pollMenu);
         menuPoll.post(pollMenu);
         hideSystemBars();
-        if (motion != null) {
-            motion.start(settings.motionTilt(), settings.motionShake());
-        }
     }
 
     @Override
     protected void onPause() {
         menuPoll.removeCallbacks(pollMenu);
-        if (motion != null) motion.stop();
         if (touch != null) touch.release();
         super.onPause();
     }
@@ -237,23 +229,10 @@ public final class GameActivity extends SDLActivity
     // --- input ---------------------------------------------------------------------------------
 
     @Override
-    public void onTouchInput(int buttons, boolean shake) {
-        touchButtons = buttons;
-        touchShake = shake;
-        pushInput();
-    }
-
-    @Override
-    public void onMotion(float tilt, boolean shake) {
-        motionTilt = tilt;
-        motionShake = shake;
-        pushInput();
-    }
-
-    private void pushInput() {
+    public void onTouchInput(int buttons, float stickX, float stickY) {
         if (!nativeReady) return;
         try {
-            nativeSetTouchState(touchButtons, touchShake || motionShake, motionTilt);
+            nativeSetTouchPad(buttons, stickX, stickY);
         } catch (UnsatisfiedLinkError e) {
             nativeReady = false;
             Log.e(TAG, "touch input bridge missing from libmain.so", e);
@@ -262,6 +241,7 @@ public final class GameActivity extends SDLActivity
 
     private void applyControlSettings() {
         touch.setControlsVisible(settings.touchControls());
+        if (nativeReady) nativeSetTouchPadEnabled(settings.touchControls());
         touch.setOpacity(settings.touchOpacity());
         touch.setHaptics(settings.haptics());
     }
@@ -291,7 +271,7 @@ public final class GameActivity extends SDLActivity
         if (inSession) items.add("Leave LAN Game");
         items.add("Quit Game");
         new AlertDialog.Builder(this)
-                .setTitle("New Super Mario Bros. Wii")
+                .setTitle("Super Smash Bros. Brawl")
                 .setItems(items.toArray(new String[0]), (dialog, which) -> {
                     final String item = items.get(which);
                     if (item.equals("Start Menu")) openStartMenu(inSession);

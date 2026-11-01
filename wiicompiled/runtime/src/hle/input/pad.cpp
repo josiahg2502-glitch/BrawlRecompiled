@@ -2,6 +2,7 @@
 #include "memory.h"
 #include "hle/controller_status_contract.h"
 #include "input_bindings.h"
+#include "touch_pad.h"
 #include "wii_remote_input.h"
 #include "frame_input.h"
 #include "runtime_config.h"
@@ -175,6 +176,7 @@ static uint32_t ReadLocalPads(PADStatus* statuses)
 
     FillTriggersHeldByButtons(statuses);
     InputBindings::Apply(statuses);
+    TouchPad::Merge(&statuses[0]);  // the Android app's on-screen controller
     // Test scripts last, and alone: a key or mouse button pressed at the PC during a scripted run must not reach
     // the game (the keyboard pad maps the mouse buttons to A and B).
     // A script's channel field drives that port (a second player's picks in a scripted match).
