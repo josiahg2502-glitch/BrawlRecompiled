@@ -1,4 +1,4 @@
-package com.wither.nsmbw;
+package com.brawlrecompiled;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -50,10 +50,10 @@ public final class LauncherActivity extends Activity {
     /** Set by the game's "Start Menu": show this screen even with Skip Start Menu on. */
     static final String EXTRA_SHOW_START_MENU = "showStartMenu";
 
-    static final String PROJECT_URL = "https://github.com/WitherBlitz/NSMB-Wii-Multiplayer-Recompilation";
+    static final String PROJECT_URL = "https://github.com/josiahg2502-glitch/BrawlRecompiled";
 
     private static final String DOLPHIN_STEPS =
-            "Use your own USA New Super Mario Bros. Wii (SMNE01, revision 1). Easiest: in Dolphin on a "
+            "Use your own USA Super Smash Bros. Brawl (RSBE01, revision 1). Easiest: in Dolphin on a "
             + "computer, right-click the game, choose Properties, Filesystem, then right-click the disc and "
             + "choose Extract Entire Disc. Copy that folder (or a zip of it) to this phone and tap Import. "
             + "Dolphin shows the revision under Properties > Info.";
@@ -90,14 +90,14 @@ public final class LauncherActivity extends Activity {
         final LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        final TextView title = text("NSMBW", 34);
+        final TextView title = text("Brawl Recompiled", 34);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.START);
         header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         header.addView(link("Help", v -> showHelp()));
         column.addView(header, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        final TextView subtitle = text("New Super Mario Bros. Wii, recompiled to run natively", 15);
+        final TextView subtitle = text("Super Smash Bros. Brawl, recompiled to run natively", 15);
         subtitle.setGravity(Gravity.START);
         column.addView(subtitle, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -140,11 +140,11 @@ public final class LauncherActivity extends Activity {
         stepsTitle.setGravity(Gravity.START);
         stepsBox.addView(stepsTitle);
         final TextView stepsText = text(
-                "1. In Dolphin on a computer, right-click New Super Mario Bros. Wii and choose Properties.\n"
+                "1. In Dolphin on a computer, right-click Super Smash Bros. Brawl and choose Properties.\n"
                 + "2. Open Filesystem, right-click the disc at the top and choose Extract Entire Disc.\n"
                 + "3. Copy that folder (or a zip of it) to this phone.\n"
                 + "4. Tap Import from Extracted Game Data Folder… or Import Game Data Zip… below and choose it.\n\n"
-                + "Use the USA disc, revision 1 (SMNE01): Dolphin shows the revision under Properties > Info.", 15);
+                + "Use the USA disc, revision 1 (RSBE01): Dolphin shows the revision under Properties > Info.", 15);
         stepsText.setGravity(Gravity.START);
         stepsText.setPadding(0, dp(6), 0, 0);
         stepsText.setLineSpacing(dp(3), 1f);
@@ -153,7 +153,7 @@ public final class LauncherActivity extends Activity {
         column.addView(stepsBox, new LinearLayout.LayoutParams(Math.min(dp(560),
                 getResources().getDisplayMetrics().widthPixels - 2 * pad), LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        final TextView importHelp = text("Import your own New Super Mario Bros. Wii (USA, SMNE01) once. "
+        final TextView importHelp = text("Import your own Super Smash Bros. Brawl (USA, RSBE01) once. "
                 + "Easiest: the folder Dolphin's Extract Entire Disc makes (DATA, or the folder that holds it), "
                 + "or a zip of that folder. Your saves are kept.", 13);
         importHelp.setTextColor(Color.rgb(170, 178, 186));
@@ -168,7 +168,7 @@ public final class LauncherActivity extends Activity {
         importZip.setOnClickListener(v -> pickZip());
         column.addView(importZip);
 
-        final TextView version = text("NSMBW " + versionText(), 13);
+        final TextView version = text("Brawl Recompiled " + versionText(), 13);
         version.setTextColor(Color.rgb(120, 128, 136));
         version.setPadding(0, dp(24), 0, 0);
         column.addView(version);
@@ -224,13 +224,13 @@ public final class LauncherActivity extends Activity {
         final LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setPadding(dp(24), dp(16), dp(24), dp(16));
-        section(column, "1. Import New Super Mario Bros. Wii", DOLPHIN_STEPS);
-        section(column, "2. Play", "Tap Play. For LAN play, move up to the Couch button at the top right of the save file screen and switch it to LAN; "
-                + "every player imports their own game.");
+        section(column, "1. Import Super Smash Bros. Brawl", DOLPHIN_STEPS);
+        section(column, "2. Play", "Tap Play. A Bluetooth or USB controller plays as a GameCube controller; without one, "
+                + "the on-screen buttons are player 1's controller. Online play is in the game's own Options (Online).");
         section(column, "Stuck on a step?", "The GitHub page covers the supported game, the steps above "
                 + "and common problems.");
         column.addView(link("Setup Guide on GitHub", v -> openWeb(PROJECT_URL + "#getting-the-game-files")));
-        final TextView version = text("NSMBW " + versionText(), 13);
+        final TextView version = text("Brawl Recompiled " + versionText(), 13);
         version.setGravity(Gravity.START);
         version.setTextColor(Color.rgb(170, 178, 186));
         version.setPadding(0, dp(16), 0, 0);

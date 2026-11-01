@@ -1,4 +1,4 @@
-package com.wither.nsmbw;
+package com.brawlrecompiled;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -37,8 +37,6 @@ final class AppSettings {
 
     boolean showFps() { return prefs.getBoolean("show_fps", false); }
     void setShowFps(boolean show) { prefs.edit().putBoolean("show_fps", show).commit(); }
-    boolean spinningCoins() { return prefs.getBoolean("spinning_coins", true); }
-    void setSpinningCoins(boolean on) { prefs.edit().putBoolean("spinning_coins", on).commit(); }
 
     boolean frameGraph() { return prefs.getBoolean("frame_graph", false); }
     void setFrameGraph(boolean on) { prefs.edit().putBoolean("frame_graph", on).commit(); }
@@ -49,11 +47,7 @@ final class AppSettings {
     float touchOpacity() { return prefs.getFloat("touch_opacity", 0.6f); }
     void setTouchOpacity(float opacity) { prefs.edit().putFloat("touch_opacity", opacity).commit(); }
 
-    boolean motionTilt() { return prefs.getBoolean("motion_tilt", true); }
-    void setMotionTilt(boolean on) { prefs.edit().putBoolean("motion_tilt", on).commit(); }
 
-    boolean motionShake() { return prefs.getBoolean("motion_shake", true); }
-    void setMotionShake(boolean on) { prefs.edit().putBoolean("motion_shake", on).commit(); }
 
     boolean haptics() { return prefs.getBoolean("haptics", true); }
     void setHaptics(boolean on) { prefs.edit().putBoolean("haptics", on).commit(); }

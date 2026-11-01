@@ -8,6 +8,11 @@ if (NOT DEFINED BUILD_SHARED_LIBS)
 else ()
   set(_USE_SHARED OFF)
 endif ()
+# Android: the app loads one library (libmain.so), and an APK's other libraries would need staging, so the
+# fetched dependencies (libpng and the like) link in statically.
+if (ANDROID)
+  set(_USE_SHARED OFF)
+endif ()
 
 function(aurora_find_package_global)
   set(_PREV_FIND_PACKAGE_TARGETS_GLOBAL ${CMAKE_FIND_PACKAGE_TARGETS_GLOBAL})

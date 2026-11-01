@@ -48,6 +48,64 @@ constexpr size_t kPad = 64u << 10;    // see SwitchFiber
 constexpr size_t kBelow = 512;        // bytes kept below a thread's resume point (its switch frame's spills)
 
 // Where each fiber resumes: written by SwitchFiber, read back when the fiber runs again.
+#if defined(__aarch64__)
+// AArch64 has no __builtin_setjmp, so the resume point is made by hand in the same layout: [0] the frame pointer,
+// [1] the resume address, [2] the stack pointer. mkw_savestate_switch pushes every callee-saved register (x19-x30,
+// d8-d15) onto the fiber's own stack, where a save copies them with the rest of the stack, records the point and
+// calls fn(arg) below it; mkw_savestate_resume puts the stack pointer back and jumps there, which pops them and
+// returns from mkw_savestate_switch.
+#if defined(__APPLE__)
+#define MKW_SAVESTATE_SYM(name) "_" #name
+#else
+#define MKW_SAVESTATE_SYM(name) #name
+#endif
+extern "C" void mkw_savestate_switch(void** jmp, void (*fn)(void*), void* arg);
+extern "C" [[noreturn]] void mkw_savestate_resume(void** jmp);
+asm(".text\n"
+    ".p2align 2\n"
+    ".globl " MKW_SAVESTATE_SYM(mkw_savestate_switch) "\n"
+    MKW_SAVESTATE_SYM(mkw_savestate_switch) ":\n"
+    "  sub sp, sp, #160\n"
+    "  stp x19, x20, [sp, #0]\n"
+    "  stp x21, x22, [sp, #16]\n"
+    "  stp x23, x24, [sp, #32]\n"
+    "  stp x25, x26, [sp, #48]\n"
+    "  stp x27, x28, [sp, #64]\n"
+    "  stp x29, x30, [sp, #80]\n"
+    "  stp d8, d9, [sp, #96]\n"
+    "  stp d10, d11, [sp, #112]\n"
+    "  stp d12, d13, [sp, #128]\n"
+    "  stp d14, d15, [sp, #144]\n"
+    "  str x29, [x0]\n"
+    "  adr x9, 1f\n"
+    "  str x9, [x0, #8]\n"
+    "  mov x9, sp\n"
+    "  str x9, [x0, #16]\n"
+    "  mov x0, x2\n"
+    "  blr x1\n"
+    "1:\n"
+    "  hint #36\n"  // bti j: the resume jump lands here
+    "  ldp x19, x20, [sp, #0]\n"
+    "  ldp x21, x22, [sp, #16]\n"
+    "  ldp x23, x24, [sp, #32]\n"
+    "  ldp x25, x26, [sp, #48]\n"
+    "  ldp x27, x28, [sp, #64]\n"
+    "  ldp x29, x30, [sp, #80]\n"
+    "  ldp d8, d9, [sp, #96]\n"
+    "  ldp d10, d11, [sp, #112]\n"
+    "  ldp d12, d13, [sp, #128]\n"
+    "  ldp d14, d15, [sp, #144]\n"
+    "  add sp, sp, #160\n"
+    "  ret\n"
+    ".globl " MKW_SAVESTATE_SYM(mkw_savestate_resume) "\n"
+    MKW_SAVESTATE_SYM(mkw_savestate_resume) ":\n"
+    "  ldr x9, [x0, #16]\n"
+    "  mov sp, x9\n"
+    "  ldr x29, [x0]\n"
+    "  ldr x9, [x0, #8]\n"
+    "  br x9\n");
+#endif
+
 struct FiberSlot {
     void* jmp[5] = {};
     char* top = nullptr;
@@ -136,7 +194,7 @@ void TakeSnapshot(Snapshot& s) {
         StackCopy copy;
         copy.fiber = fiber;
         copy.slot = slot;
-        copy.from = static_cast<char*>(slot.jmp[2]) - kBelow;  // __builtin_setjmp keeps the stack pointer in [2]
+        copy.from = static_cast<char*>(slot.jmp[2]) - kBelow;  // the resume point keeps the stack pointer in [2]
         copy.bytes.assign(copy.from, slot.top);
         s.stacks.push_back(std::move(copy));
     }
@@ -208,7 +266,11 @@ std::string LoadProblem(const Snapshot& s) {
         RT_LOGF(RT_TAG_RUNTIME, "[savestate] fiber %p resumed with no saved point (%zu fibers)\n", fiber, g_fibers.size());
         std::abort();
     }
+#if defined(__aarch64__)
+    mkw_savestate_resume(slot.jmp);
+#else
     __builtin_longjmp(slot.jmp, 1);
+#endif
 }
 
 } // namespace
@@ -249,6 +311,9 @@ void MarkStackTop(void* top) { g_fibers[HostContext::Current()].top = static_cas
 
 [[gnu::noinline]] void SwitchFiber(void* target) {
     void** jmp = g_fibers[HostContext::Current()].jmp;
+#if defined(__aarch64__)
+    mkw_savestate_switch(jmp, &SwitchBelow, target);
+#else
     if (__builtin_setjmp(jmp) == 0) {
 #if defined(__x86_64__) && defined(_WIN32)
         // Win64: the frame address __builtin_setjmp keeps is rbp minus the SEH frame offset, but the resume path reloads
@@ -258,6 +323,7 @@ void MarkStackTop(void* top) { g_fibers[HostContext::Current()].top = static_cas
 #endif
         SwitchBelow(target);
     }
+#endif
 }
 
 void FrameBoundary() {

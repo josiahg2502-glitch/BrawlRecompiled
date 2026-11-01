@@ -1,4 +1,4 @@
-package com.wither.nsmbw;
+package com.brawlrecompiled;
 
 import android.app.Activity;
 import android.app.AlertDialog;

@@ -60,6 +60,11 @@ class Partition:
 
 def main(src, dst):
     disc = Wbfs(src)
+    extract(disc, lambda off: Partition(disc, off), dst)
+
+# `disc` reads the raw disc (and counts `holes`); `open_partition(offset)` gives a reader of a partition's decrypted
+# data. extract_rvz.py feeds its own readers through the same walk.
+def extract(disc, open_partition, dst):
     gid = disc.read(0, 6)
     parts = []
     for g in range(4):
@@ -67,7 +72,7 @@ def main(src, dst):
         for i in range(cnt):
             off, typ = struct.unpack(">II", disc.read((tbl << 2) + i * 8, 8))
             parts.append((typ, off << 2))
-    p = Partition(disc, next(off for typ, off in parts if typ == 0))
+    p = open_partition(next(off for typ, off in parts if typ == 0))
     boot = p.read(0, 0x440)
     assert boot[:6] == gid and boot[0x18:0x1C] == bytes.fromhex("5D1C9EA3"), "decryption check failed"
     dol_off, fst_off, fst_sz = (u32(boot, o) << 2 for o in (0x420, 0x424, 0x428))

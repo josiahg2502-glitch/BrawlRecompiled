@@ -1,4 +1,4 @@
-package com.wither.nsmbw;
+package com.brawlrecompiled;
 
 import android.content.Context;
 import android.content.pm.PackageInfo;
@@ -23,7 +23,7 @@ import java.util.Locale;
  * finds them through WIICOMPILED_RUNTIME_DIR.</li>
  * <li>User data (Config.toml, NAND with the saves, caches, logs) and the player's game data
  * (game/files, game/sys) live in the app's external files directory,
- * Android/data/com.wither.nsmbw/files, which a PC can reach over USB; WIICOMPILED_DATA_DIR.</li>
+ * Android/data/com.brawlrecompiled/files, which a PC can reach over USB; WIICOMPILED_DATA_DIR.</li>
  * </ul>
  */
 final class AppFiles {
@@ -77,12 +77,12 @@ final class AppFiles {
     static String headerProblem(byte[] header) {
         final String id = new String(header, 0, 6, StandardCharsets.US_ASCII);
         final int revision = header[7] & 0xFF;
-        if (!id.equals("SMNE01")) {
-            return "That is " + id.trim() + ", not New Super Mario Bros. Wii for the USA (SMNE01). "
+        if (!id.equals("RSBE01")) {
+            return "That is " + id.trim() + ", not Super Smash Bros. Brawl for the USA (RSBE01). "
                     + "This port runs only the USA disc, revision 1.";
         }
         if (revision != 1) {
-            return "That is New Super Mario Bros. Wii revision " + revision + ". This port runs only "
+            return "That is Super Smash Bros. Brawl revision " + revision + ". This port runs only "
                     + "revision 1 (Dolphin shows it under Properties > Info).";
         }
         return null;
@@ -133,7 +133,6 @@ final class AppFiles {
                 + "skip_unready_pipelines = true\n"
                 + "disable_copy_filter = true\n"
                 + "show_fps = " + settings.showFps() + "\n"
-                + "spinning_coins = " + settings.spinningCoins() + "\n"
                 + "frame_graph = " + settings.frameGraph() + "\n"
                 + "texture_replacements = false\n"
                 + "texture_dumps = false\n"
@@ -170,7 +169,7 @@ final class AppFiles {
                 if (keep) kept.append(line).append('\n');
             }
         } catch (IOException e) {
-            android.util.Log.w("NSMBW", "could not read the old Config.toml", e);
+            android.util.Log.w("BrawlRecompiled", "could not read the old Config.toml", e);
         }
         return kept.toString();
     }

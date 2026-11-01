@@ -1,3 +1,4 @@
+#include "touch_pad.h"
 #include <aurora/aurora.h>
 #include <aurora/imgui.h>
 #include <unordered_map>
@@ -1588,7 +1589,11 @@ void DrawStartupScreen() {
                 GameLayout::DrawText(list, view, small, u, 0.0f, cardY - 30.0f + bob, Fit(small, u, 17.0f), 0xD6D9E4FFu,
                                      0xB8BCCBFFu, 1.0f, 1, 1);
                 // How to reach the settings, along the card's bottom edge.
+#if defined(__ANDROID__)
+                const auto hint = GameLayout::Utf16("The phone's Back gesture or the menu button = app menu");
+#else
                 const auto hint = GameLayout::Utf16("F10 or Home = options   F5 / F7 = save / load state   F8 = fast-forward   F9 = online");
+#endif
                 GameLayout::DrawText(list, view, small, hint, 0.0f, cardY - hh + 16.0f + bob, Fit(small, hint, 12.0f),
                                      0x8E93A6FFu, 0x8E93A6FFu, 1.0f, 1, 1);
             }
@@ -1692,7 +1697,7 @@ void UpdateBootShaderState() {
 std::string StartButtonName() {
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    std::string name = "Enter";
+    std::string name = TouchPad::Enabled() ? "A" : "Enter";
     if (ids != nullptr && count > 0) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
         switch (pad != nullptr ? SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_SOUTH) : SDL_GAMEPAD_BUTTON_LABEL_A) {
@@ -1725,6 +1730,7 @@ void UpdateStartupPress() {
     pressed = pressed || (SDL_GetKeyboardFocus() != nullptr && keys != nullptr &&
                           (keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_KP_ENTER]));
     pressed = pressed || (SDL_GetMouseFocus() != nullptr && (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0);
+    pressed = TouchPad::TakePress(PAD_BUTTON_A | PAD_BUTTON_START) || pressed;  // the Android on-screen controller
     if (pressed) NotifyStrapInputAccepted();
 }
 
