@@ -23,6 +23,11 @@
 // trigger shakes, right stick tilts.
 namespace VirtualRemote {
 
+// Brawl: whether the keyboard plays as a sideways Wii Remote (keys from Keybinds) instead of a GameCube
+// controller. Config.toml [keyboard] controller = "wii_remote" / "gamecube"; F10 > Controls changes it.
+bool KeyboardIsRemote();
+void SetKeyboardIsRemote(bool remote);
+
 // True when `chan` should report a connected Wii Remote driven by a keyboard or gamepad.
 bool Present(uint32_t chan);
 // Fills one frame of the virtual remote on `chan`; false when Present(chan) is false.

@@ -845,7 +845,7 @@ bool ScriptedPadButtons(uint32_t port, uint16_t& buttons, int8_t& stickX, int8_t
 
 void HideRemotesFromPad(PADStatus* statuses, uint32_t count) {
     for (uint32_t port = 0; port < count && port < PAD_MAX_CONTROLLERS; ++port) {
-        if (IsKpadKind(RealKind(port))) {
+        if (IsKpadKind(EffectiveKind(port))) {
             statuses[port] = {};
             statuses[port].err = PAD_ERR_NO_CONTROLLER;
         }

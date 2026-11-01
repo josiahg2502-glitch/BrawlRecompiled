@@ -96,7 +96,8 @@ float AccelCalibrationProgress();
 const char* AccelCalibrationMessage();
 
 // Reports "no controller" on the GameCube side for every port served through
-// KPAD, so the game never sees the same remote twice. Runs after aurora's PADRead.
+// KPAD (Brawl: also the keyboard's port while it plays as a Wii Remote), so the game never
+// sees the same remote twice. Runs after aurora's PADRead.
 void HideRemotesFromPad(PADStatus* statuses, uint32_t count);
 // Test scripts (input_script.txt): the scripted buttons on port 1 as GameCube PAD_BUTTON_* bits, or false when no
 // script runs (Brawl's menus and battles read the GameCube pad).
