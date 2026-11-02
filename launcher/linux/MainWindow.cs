@@ -1127,7 +1127,7 @@ sealed class MainWindow : Window
             "2. Insert Super Smash Bros. Brawl and dump it to an SD card or USB drive. CleanRip writes a .iso " +
             "(it may be split into .part files: join them with  cat game.part* > game.iso ); USB Loader GX writes a .wbfs.\n" +
             "3. Copy the file to this PC and choose it with the button above. .iso, .ciso and .wbfs all work.\n" +
-            "The USA release, revision 1, works (the European and Japanese discs do not). " +
+            "The USA release, revision 1 or 2, works (the European and Japanese discs do not). " +
             "A Dolphin-extracted folder also works: put it in Disc/DATA next to the launcher."));
     }
 
@@ -1140,8 +1140,8 @@ sealed class MainWindow : Window
         var header = new byte[8];
         using (var f = File.OpenRead(Path.Combine(path, "sys", "boot.bin"))) f.ReadExactly(header, 0, 8);
         string id = System.Text.Encoding.ASCII.GetString(header, 0, 6);
-        if (id != WiiDisc.Game || header[7] != WiiDisc.GameRevision)
-            return (false, $"The disc folder holds {id} revision {header[7]}, not Super Smash Bros. Brawl USA revision {WiiDisc.GameRevision}: {path}", path);
+        if (id != WiiDisc.Game || !WiiDisc.RevisionWorks(header[7]))
+            return (false, $"The disc folder holds {id} revision {header[7]}, not Super Smash Bros. Brawl USA revision 1 or 2: {path}", path);
         return (true, "Super Smash Bros. Brawl (USA) is ready: " + path, path);
     }
 

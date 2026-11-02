@@ -259,7 +259,7 @@ static bool IsDvdDataRoot(const fs::path& path) {
         details += HostPathText(path);
     }
     details += "\n\nSet [paths] dvd_root in Config.toml to your Super Smash Bros. Brawl "
-               "(RSBE01 revision 1), extracted with Dolphin's Extract Entire Disc.";
+               "(RSBE01 revision 1 or 2), extracted with Dolphin's Extract Entire Disc.";
     FailDvd("dvd_root", "DVD data is unavailable", details);
 }
 

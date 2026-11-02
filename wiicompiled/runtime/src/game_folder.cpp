@@ -27,7 +27,7 @@ bool IsExtractedDisc(const fs::path& path) {
 constexpr const wchar_t* kTitle = L"Super Smash Bros. Brawl";
 
 constexpr const wchar_t* kSteps =
-    L"This port runs your own copy of Super Smash Bros. Brawl (USA, RSBE01, revision 1). "
+    L"This port runs your own copy of Super Smash Bros. Brawl (USA, RSBE01, revision 1 or 2). "
     L"Extract it once with Dolphin:\n\n"
     L"1. Open Dolphin on this computer and find Super Smash Bros. Brawl in the game list.\n"
     L"2. Right-click it, choose Properties, then the Filesystem tab.\n"
@@ -109,12 +109,15 @@ std::string Problem(const fs::path& root) {
     // projects/spm/pal/tools/make_pal_runtime.py rewrites these two for the PAL engine (R8PP01, any revision).
     constexpr const char* kGameId = "RSBE01";
     constexpr int kRevision = 1;
+    // Revision 2 runs the same: its modules are revision 1's byte for byte, and its main.dol is never read (the
+    // translation has revision 1's built in).
+    constexpr int kAlsoRevision = 2;
     if (id != kGameId) {
         return "That is " + id + ", not Super Smash Bros. Brawl " + kGameId + ". This engine runs only that disc.";
     }
-    if (kRevision >= 0 && revision != kRevision) {
+    if (kRevision >= 0 && revision != kRevision && revision != kAlsoRevision) {
         return "That is Super Smash Bros. Brawl revision " + std::to_string(revision) +
-               ". This port runs only revision 0 (Dolphin shows it under Properties > Info).";
+               ". This port runs revision 1 or 2 (Dolphin shows it under Properties > Info).";
     }
     return {};
 }
