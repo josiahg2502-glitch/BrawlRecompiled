@@ -60,17 +60,19 @@ sealed class WiiDisc : IDisposable
             throw new InvalidDataException("The partition did not decrypt correctly; the image is damaged or not a plain Wii disc.");
     }
 
-    // The one disc the translation was made from: Super Smash Bros. Brawl, USA, revision 1 (the common print).
+    // The disc the translation was made from: Super Smash Bros. Brawl, USA, revision 1 (the common print). Revision 2
+    // runs the same: its 126 modules are revision 1's byte for byte, and its main.dol is never read (the engine has
+    // revision 1's built in).
     public const string Game = "RSBE01";
-    public const int GameRevision = 1;
+    public static bool RevisionWorks(int revision) => revision is 1 or 2;
 
     // "" when this is the disc the game runs, else why not.
     public string Problem()
     {
         if (GameId != Game)
             return $"That is {GameId} ({Title}), not Super Smash Bros. Brawl for the USA (RSBE01). Only that disc works.";
-        if (Revision != GameRevision)
-            return $"That is Super Smash Bros. Brawl USA revision {Revision}; only revision {GameRevision} works.";
+        if (!RevisionWorks(Revision))
+            return $"That is Super Smash Bros. Brawl USA revision {Revision}; only revisions 1 and 2 work.";
         return "";
     }
 
