@@ -241,6 +241,23 @@ void ResetPristine(uint32_t start, uint32_t end) {
             const uint32_t function = g_mkwGuardedFunctionStarts[index];
             if (function >= start && function < end) g_mkwGuestCodePatched[index] = 1;
         }
+        // A function of this module that inlined a leaf patched outside it still holds the leaf's old code, and that
+        // leaf's patch is never noticed again (its page is not reloaded): keep the caller in the interpreter. Project+'s
+        // Custom Sound Engine patches the song start delay getter 0x800791F0, inlined into sora_melee's 0x8094CA30;
+        // cleared here, every match ran the old getter and its stage music never started (issue #38).
+        const auto* pairs = reinterpret_cast<const std::array<uint32_t, 2>*>(g_mkwInlinedLeaves);
+        for (uint32_t i = 0; i < g_mkwInlinedLeafCount; ++i) {
+            const uint32_t leaf = pairs[i][0];
+            const uint32_t caller = pairs[i][1];
+            const uint32_t callerStart = g_mkwGuardedFunctionStarts[caller];
+            const uint32_t leafStart = g_mkwGuardedFunctionStarts[leaf];
+            if (callerStart < start || callerStart >= end || (leafStart >= start && leafStart < end)) continue;
+            if (g_mkwGuestCodePatched[leaf] && !g_mkwGuestCodePatched[caller]) {
+                g_mkwGuestCodePatched[caller] = 1;
+                RT_LOGF(RT_TAG_MOD, "[mods] function 0x%08X inlined 0x%08X: it stays in the interpreter after its "
+                        "module reloaded\n", callerStart, leafStart);
+            }
+        }
         for (uint32_t page = start & ~(kPage - 1); page < end; page += kPage) g_dirty.erase(page);
         for (auto it = g_loggedWords.begin(); it != g_loggedWords.end();) {
             it = *it >= start && *it < end ? g_loggedWords.erase(it) : std::next(it);
