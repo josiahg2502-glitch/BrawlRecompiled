@@ -17,6 +17,14 @@
 #define SAVE_STATES_ZSTD 1
 #endif
 
+// Saving a thread's resume point relies on __builtin_setjmp, which clang provides only on x86. Elsewhere (64-bit ARM
+// Linux, issue #15) save states are off: fiber switches go straight to HostContext::Switch.
+#if defined(__x86_64__) || defined(__i386__)
+#define SAVE_STATES_SUPPORTED 1
+#else
+#define SAVE_STATES_SUPPORTED 0
+#endif
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -208,7 +216,11 @@ std::string LoadProblem(const Snapshot& s) {
         RT_LOGF(RT_TAG_RUNTIME, "[savestate] fiber %p resumed with no saved point (%zu fibers)\n", fiber, g_fibers.size());
         std::abort();
     }
+#if SAVE_STATES_SUPPORTED
     __builtin_longjmp(slot.jmp, 1);
+#else
+    std::abort();  // unreachable: nothing records a resume point without save state support
+#endif
 }
 
 } // namespace
@@ -216,7 +228,7 @@ std::string LoadProblem(const Snapshot& s) {
 int Slot() { return g_slot; }
 void SetSlot(int slot) { g_slot = std::clamp(slot, 0, kSlots - 1); }
 bool Exists(int slot) { return slot >= 0 && slot < kSlots && g_states[slot].valid; }
-bool Available() { return !DetClock::Enabled(); }
+bool Available() { return SAVE_STATES_SUPPORTED && !DetClock::Enabled(); }
 void RequestSave() { if (Available()) g_request = 1; }
 void RequestLoad() { if (Available()) g_request = 2; }
 
@@ -248,6 +260,10 @@ void MarkStackTop(void* top) { g_fibers[HostContext::Current()].top = static_cas
 }
 
 [[gnu::noinline]] void SwitchFiber(void* target) {
+#if !SAVE_STATES_SUPPORTED
+    HostContext::Switch(target);
+    return;
+#else
     void** jmp = g_fibers[HostContext::Current()].jmp;
     if (__builtin_setjmp(jmp) == 0) {
 #if defined(__x86_64__) && defined(_WIN32)
@@ -258,6 +274,7 @@ void MarkStackTop(void* top) { g_fibers[HostContext::Current()].top = static_cas
 #endif
         SwitchBelow(target);
     }
+#endif
 }
 
 void FrameBoundary() {
