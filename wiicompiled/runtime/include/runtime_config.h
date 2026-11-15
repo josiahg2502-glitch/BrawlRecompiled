@@ -928,7 +928,7 @@ inline bool SetRumbleEnabled(bool value) {
 }
 
 // [controller] menu_on_select: Select (Back) alone opens and closes the options menu, for players whose Home button
-// belongs to the Game Bar or Steam overlay. Home and Back + Start keep working either way.
+// belongs to the Game Bar or Steam overlay; Home then no longer opens it. Back + Start works either way.
 inline bool MenuOnSelect(bool fallback = false) {
     return Get().menuOnSelect.value_or(fallback);
 }
