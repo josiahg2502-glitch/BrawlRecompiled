@@ -389,9 +389,10 @@ elseif(MKW_PLATFORM_ANDROID)
     # Cross-compiled, so -mcpu=native would describe the build machine. ARMv8.2-A (LSE atomics,
     # RCpc loads) is the floor of every Android phone since Cortex-A55/A75.
     set(MKW_BASELINE_ARCH_FLAG -march=armv8.2-a)
-elseif(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
-    # Cross-compiled for another ARM machine: -mcpu=native would describe the build PC. ARMv8.0-A covers
-    # every 64-bit ARM Linux device, the Switch's Cortex-A57 (Tegra X1) included.
+elseif(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    # Cross-compiled for another ARM Linux machine: -mcpu=native would describe the build PC. ARMv8.0-A covers
+    # every 64-bit ARM Linux device, the Switch's Cortex-A57 (Tegra X1) included. Nothing assumes LSE atomics
+    # (ARMv8.1): atomics go through std::atomic, which ARMv8.0 code does with exclusive load/store pairs.
     set(MKW_BASELINE_ARCH_FLAG -march=armv8-a)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
     set(MKW_BASELINE_ARCH_FLAG -mcpu=native)
