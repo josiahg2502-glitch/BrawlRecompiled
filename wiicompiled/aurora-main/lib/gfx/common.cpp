@@ -693,9 +693,9 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
   // The clear may cover more than the copy: every pixel the guest rectangle touches (a copy's whole-pixel
   // rectangle leaves out a partly covered edge column at a non-integer scale; see GXCopyTex).
   ClipRect clearRect = rect;
-  if (clearRectOverride != nullptr) {
-    const int32_t tw = static_cast<int32_t>(prevPass.targetSize.width);
-    const int32_t th = static_cast<int32_t>(prevPass.targetSize.height);
+  const int32_t tw = static_cast<int32_t>(prevPass.targetSize.width);
+  const int32_t th = static_cast<int32_t>(prevPass.targetSize.height);
+  if (clearRectOverride != nullptr && tw > 0 && th > 0) {  // the clamps below need a non-empty target
     const int32_t left = std::clamp(clearRectOverride->x, 0, tw - 1);
     const int32_t top = std::clamp(clearRectOverride->y, 0, th - 1);
     const int32_t right = std::clamp(clearRectOverride->x + clearRectOverride->width, left + 1, tw);
