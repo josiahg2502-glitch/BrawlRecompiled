@@ -94,15 +94,21 @@ CopySourceRect map_texture_copy_source(const aurora::gfx::ClipRect& source, bool
   const auto top = mapEdge(source.y, logicalHeight, targetHeight);
   const auto right = mapEdge(source.x + source.width, logicalWidth, targetWidth);
   const auto bottom = mapEdge(source.y + source.height, logicalHeight, targetHeight);
+  const aurora::gfx::ClipRect pixels{
+      .x = left.nearest,
+      .y = top.nearest,
+      .width = std::max<int32_t>(right.nearest - left.nearest, 1),
+      .height = std::max<int32_t>(bottom.nearest - top.nearest, 1),
+  };
+  // Brawl: the copy samples the same whole pixels it clears. At a non-integer scale (Fill Window: 853/640) the exact
+  // edges are fractional: a 512x512 render-to-texture pass (the shadow texture) maps to 682.4 pixels, which made the
+  // copy shader-sampled and linearly filtered, so its last column took 40% of a pixel the pass never drew. Projected
+  // with the shadows, that column was a line across the stage that appeared at some camera angles. Snapped, a copy
+  // whose destination is the same size is an exact 1:1 copy.
   return {
-      .clearRect =
-          {
-              .x = left.nearest,
-              .y = top.nearest,
-              .width = std::max<int32_t>(right.nearest - left.nearest, 1),
-              .height = std::max<int32_t>(bottom.nearest - top.nearest, 1),
-          },
-      .sampleRect = {left.sample, top.sample, right.sample - left.sample, bottom.sample - top.sample},
+      .clearRect = pixels,
+      .sampleRect = {static_cast<float>(pixels.x), static_cast<float>(pixels.y), static_cast<float>(pixels.width),
+                     static_cast<float>(pixels.height)},
   };
 }
 
