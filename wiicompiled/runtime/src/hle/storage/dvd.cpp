@@ -259,7 +259,7 @@ static bool IsDvdDataRoot(const fs::path& path) {
         details += HostPathText(path);
     }
     details += "\n\nSet [paths] dvd_root in Config.toml to your Super Smash Bros. Brawl "
-               "(RSBE01 revision 1), extracted with Dolphin's Extract Entire Disc.";
+               "(RSBE01 revision 1 or 2), extracted with Dolphin's Extract Entire Disc.";
     FailDvd("dvd_root", "DVD data is unavailable", details);
 }
 
@@ -966,6 +966,13 @@ extern "C" void DVDInit_8015EA1C()
         if (boot.read(id, sizeof(id))) {
             for (uint32_t i = 0; i < sizeof(id); ++i) Memory::Write8(diskHeader + i, static_cast<uint8_t>(id[i]));
         }
+    }
+    // Revision 2's main.dol is revision 1's but for one instruction: the version in the game's own copy of its disc
+    // ID (fn_8001BBB8). The translation is revision 1's, so a revision 2 disc is shown to it as revision 1, or
+    // gfErrorCheck asks for the disc.
+    if (Memory::Read8(diskHeader + 0x07) == 2) {
+        Memory::Write8(diskHeader + 0x07, 1);
+        RT_LOGF(RT_TAG_DVD, "disc ID: revision 2 disc, shown to the game as revision 1 (the translation's)\n");
     }
     Memory::Write32(diskHeader + 0x00, CurrentDiscGameCode());
     
