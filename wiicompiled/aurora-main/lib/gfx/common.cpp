@@ -592,7 +592,8 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
                   Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat,
                   const Vec4<float>* sourceRectPixels, bool halfScale,
                   const std::array<u32, 3>* copyFilterCoefficients, bool forceOpaqueAlpha,
-                  float copyFilterRowStride, bool clampTop, bool clampBottom, bool persistentCopy) {
+                  float copyFilterRowStride, bool clampTop, bool clampBottom, bool persistentCopy,
+                  const ClipRect* clearRectOverride) {
   // Resolve current render pass
   if (!has_current_render_pass()) {
     Log.warn("Dropping resolve pass without an active render pass");
@@ -689,9 +690,21 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
       clampBottomUv,
   };
   prevPass.resolveUniformRange = push_uniform(resolveUniform);
-  const bool clearFullTarget = rect.x <= 0 && rect.y <= 0 &&
-                               rect.width >= static_cast<int32_t>(prevPass.targetSize.width) &&
-                               rect.height >= static_cast<int32_t>(prevPass.targetSize.height);
+  // The clear may cover more than the copy: every pixel the guest rectangle touches (a copy's whole-pixel
+  // rectangle leaves out a partly covered edge column at a non-integer scale; see GXCopyTex).
+  ClipRect clearRect = rect;
+  if (clearRectOverride != nullptr) {
+    const int32_t tw = static_cast<int32_t>(prevPass.targetSize.width);
+    const int32_t th = static_cast<int32_t>(prevPass.targetSize.height);
+    const int32_t left = std::clamp(clearRectOverride->x, 0, tw - 1);
+    const int32_t top = std::clamp(clearRectOverride->y, 0, th - 1);
+    const int32_t right = std::clamp(clearRectOverride->x + clearRectOverride->width, left + 1, tw);
+    const int32_t bottom = std::clamp(clearRectOverride->y + clearRectOverride->height, top + 1, th);
+    clearRect = {.x = left, .y = top, .width = right - left, .height = bottom - top};
+  }
+  const bool clearFullTarget = clearRect.x <= 0 && clearRect.y <= 0 &&
+                               clearRect.width >= static_cast<int32_t>(prevPass.targetSize.width) &&
+                               clearRect.height >= static_cast<int32_t>(prevPass.targetSize.height);
   const bool useAttachmentColorClear = clearFullTarget && clearColor && clearAlpha;
   const bool useAttachmentDepthClear = clearFullTarget && clearDepth;
 
@@ -733,7 +746,7 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
             },
         .depth = clearDepthValue,
         .useScissor = !clearFullTarget,
-        .scissor = rect,
+        .scissor = clearRect,
     });
   }
   push_command(CommandType::SetViewport, Command::Data{.setViewport = g_cachedViewport});

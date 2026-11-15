@@ -50,6 +50,8 @@ CopyClearState get_copy_clear_state(GXBool clear) {
 struct CopySourceRect {
   aurora::gfx::ClipRect clearRect;
   aurora::Vec4<float> sampleRect;
+  // Every target pixel the guest rectangle touches (edges rounded outward): what the copy's clear must reach.
+  aurora::gfx::ClipRect coverRect = clearRect;
 };
 
 CopySourceRect map_texture_copy_source(const aurora::gfx::ClipRect& source, bool renderSpace) {
@@ -74,6 +76,8 @@ CopySourceRect map_texture_copy_source(const aurora::gfx::ClipRect& source, bool
   struct MappedEdge {
     float sample;
     int32_t nearest;
+    int32_t floor;
+    int32_t ceil;
   };
   const auto mapEdge = [](int32_t edge, uint32_t logicalSize, uint32_t targetSize) {
     // Round scaled copy edges consistently to avoid seams and off-by-one pixels.
@@ -85,9 +89,13 @@ CopySourceRect map_texture_copy_source(const aurora::gfx::ClipRect& source, bool
     const int64_t roundingThreshold = (denominator + 1) / 2;
     const int64_t nearestValue =
         quotient + (remainderMagnitude >= roundingThreshold ? (numerator < 0 ? -1 : 1) : 0);
+    const int64_t floorValue = quotient - (remainder < 0 ? 1 : 0);
+    const int64_t ceilValue = quotient + (remainder > 0 ? 1 : 0);
     return MappedEdge{
         .sample = static_cast<float>(static_cast<double>(numerator) / static_cast<double>(denominator)),
         .nearest = static_cast<int32_t>(nearestValue),
+        .floor = static_cast<int32_t>(floorValue),
+        .ceil = static_cast<int32_t>(ceilValue),
     };
   };
   const auto left = mapEdge(source.x, logicalWidth, targetWidth);
@@ -109,6 +117,13 @@ CopySourceRect map_texture_copy_source(const aurora::gfx::ClipRect& source, bool
       .clearRect = pixels,
       .sampleRect = {static_cast<float>(pixels.x), static_cast<float>(pixels.y), static_cast<float>(pixels.width),
                      static_cast<float>(pixels.height)},
+      .coverRect =
+          {
+              .x = left.floor,
+              .y = top.floor,
+              .width = std::max<int32_t>(right.ceil - left.floor, 1),
+              .height = std::max<int32_t>(bottom.ceil - top.floor, 1),
+          },
   };
 }
 
@@ -616,7 +631,7 @@ void GXCopyTex(void* dest, GXBool clear) {
                             &sourceRect.sampleRect, g_gxState.texCopyHalfScale, &copyFilter, forceOpaqueAlpha,
                             sourceRect.sampleRect.w() / std::max<float>(g_gxState.texCopySrc.height, 1.0f),
                             (g_gxState.copyClamp & GX_CLAMP_TOP) != 0,
-                            (g_gxState.copyClamp & GX_CLAMP_BOTTOM) != 0, persistentCopy);
+                            (g_gxState.copyClamp & GX_CLAMP_BOTTOM) != 0, persistentCopy, &sourceRect.coverRect);
   ++handle.revision;
   handle.lastProducedFrame = currentFrame;
   handle.width = logicalDstWidth;

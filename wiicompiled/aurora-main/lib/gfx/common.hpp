@@ -335,7 +335,7 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
                   const Vec4<float>* sourceRectPixels = nullptr, bool halfScale = false,
                   const std::array<u32, 3>* copyFilterCoefficients = nullptr, bool forceOpaqueAlpha = false,
                   float copyFilterRowStride = 1.0f, bool clampTop = false, bool clampBottom = false,
-                  bool persistentCopy = false);
+                  bool persistentCopy = false, const ClipRect* clearRectOverride = nullptr);
 
 void begin_offscreen(uint32_t width, uint32_t height);
 void end_offscreen();
