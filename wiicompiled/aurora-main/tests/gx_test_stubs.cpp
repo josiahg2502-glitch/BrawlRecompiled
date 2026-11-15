@@ -436,7 +436,8 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
                   Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat,
                   const Vec4<float>* sourceRectPixels, bool halfScale,
                   const std::array<u32, 3>* copyFilterCoefficients, bool forceOpaqueAlpha,
-                  float copyFilterRowStride, bool clampTop, bool clampBottom, bool persistentCopy) {
+                  float copyFilterRowStride, bool clampTop, bool clampBottom, bool persistentCopy,
+                  const ClipRect*) {
   testing::ResolvePassRecord record;
   record.texture = std::move(texture);
   record.rect = rect;
