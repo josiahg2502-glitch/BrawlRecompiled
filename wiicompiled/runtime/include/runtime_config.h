@@ -104,6 +104,7 @@ struct RuntimeUserConfig {
     // "dpad_up,left_shoulder") as values; pressing either bound button counts.
     std::array<std::optional<std::string>, 12> controllerButtons;
     std::optional<bool> rumbleEnabled;
+    std::optional<bool> menuOnSelect;
     std::optional<int32_t> muteHotkey;
     std::map<std::string, std::string> controllerExpressions;
     // NSMBW: [keyboard] action = "comma-separated SDL scancode names" (keybinds.h).
@@ -515,6 +516,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     }
 
     config.rumbleEnabled = FindConfigValue<bool>(document, "controller", "rumble");
+    config.menuOnSelect = FindConfigValue<bool>(document, "controller", "menu_on_select");
     if (auto value = FindConfigInt(document, "audio", "mute_key")) {
         config.muteHotkey = *value;
     }
@@ -923,6 +925,17 @@ inline bool RumbleEnabled(bool fallback = true) {
 inline bool SetRumbleEnabled(bool value) {
     Mutable().rumbleEnabled = value;
     return WriteSetting("controller", "rumble", value ? "true" : "false");
+}
+
+// [controller] menu_on_select: Select (Back) alone opens and closes the options menu, for players whose Home button
+// belongs to the Game Bar or Steam overlay. Home and Back + Start keep working either way.
+inline bool MenuOnSelect(bool fallback = false) {
+    return Get().menuOnSelect.value_or(fallback);
+}
+
+inline bool SetMenuOnSelect(bool value) {
+    Mutable().menuOnSelect = value;
+    return WriteSetting("controller", "menu_on_select", value ? "true" : "false");
 }
 
 inline int32_t MuteHotkey(int32_t fallback) {

@@ -106,6 +106,7 @@ bool g_topBarVisible = false;
 bool g_exitPromptOpen = false;
 std::atomic<bool> g_fastForward{std::getenv("BRAWL_FAST_FORWARD") != nullptr};  // the env var: tests start with it on
 bool g_rumbleEnabled = RuntimeConfigFile::RumbleEnabled(true);
+bool g_menuOnSelect = RuntimeConfigFile::MenuOnSelect(false);
 int g_controllerPort = 0;
 float g_resolutionScale = RuntimeConfigFile::ResolutionMultiplier(1.0f);
 int g_audioVolumePercent = static_cast<int>(std::lround(RuntimeConfigFile::AudioVolume(1.0f) * 100.0f));

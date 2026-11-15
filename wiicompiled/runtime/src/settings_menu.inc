@@ -173,6 +173,13 @@ void ControlsRows(std::vector<MenuRow>& rows) {
     rows.push_back({"Player", "PLAYER " + std::to_string(port + 1),
                     std::string("Controller on this port: ") + (name != nullptr ? name : "none") + ". Every pad is set up automatically.",
                     [](int step) { g_controllerPort = Cycle(g_controllerPort, step, PAD_MAX_CONTROLLERS); }});
+    rows.push_back({"Menu button", g_menuOnSelect ? "SELECT" : "HOME",
+                    "Which controller button opens this menu. Select frees Home for the Game Bar or Steam; "
+                    "Back + Start together always works.",
+                    [](int) {
+                        g_menuOnSelect = !g_menuOnSelect;
+                        RuntimeConfigFile::SetMenuOnSelect(g_menuOnSelect);
+                    }});
     rows.push_back({"Vibration", OnOff(g_rumbleEnabled), "Rumble on every controller.", [](int) {
                         g_rumbleEnabled = !g_rumbleEnabled;
                         PAD_HLE_SetRumbleEnabled(g_rumbleEnabled);
@@ -616,15 +623,17 @@ void DrawOptionsMenu() {
     if (g_rebind.active) PollRebind(false);
 }
 
-// Home (guide) on any controller, or Back and Start held together, opens and closes the menu.
+// Home (guide) on any controller, or Back and Start held together, opens and closes the menu; with the "Menu button"
+// setting on Select, Back alone does instead of Home (issue #40: Home opens the Game Bar or Steam overlay too).
 void PollMenuButton() {
     static bool wasDown = false;
     bool down = false;
     for (u32 i = 0; i < 8 && SDL_GetKeyboardFocus() != nullptr; ++i) {
         SDL_Gamepad* pad = PADGetSDLGamepadForIndex(i);
         if (pad == nullptr) continue;
-        down = down || SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_GUIDE) ||
-               (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK) && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START));
+        const bool back = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK);
+        down = down || (g_menuOnSelect ? back : SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_GUIDE)) ||
+               (back && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START));
     }
     if (down && !wasDown && !OnlineMenu::IsOpen() && !StartupScreenVisible()) SetTopBarVisible(!g_topBarVisible);
     wasDown = down;
