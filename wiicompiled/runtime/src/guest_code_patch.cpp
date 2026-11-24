@@ -94,6 +94,21 @@ void MarkInliningCallers(uint32_t leaf) {
     }
 }
 
+// A module's relink clears its functions' interpreter check, including callers that only had it for an inlined copy of
+// a patched leaf outside [start, end) (Project M's character table moved by patching main.dol's
+// muMenu::exchangeMuSelchkind2MuStockchkind, inlined into the character select). That leaf is not patched again, so
+// nothing would mark them anew and their stale inlined copy would run: mark them here.
+void RemarkInliningCallersLocked(uint32_t start, uint32_t end) {
+    const auto* pairs = reinterpret_cast<const std::array<uint32_t, 2>*>(g_mkwInlinedLeaves);
+    for (uint32_t i = 0; i < g_mkwInlinedLeafCount; ++i) {
+        const uint32_t leaf = pairs[i][0], caller = pairs[i][1];
+        const uint32_t leafFunction = g_mkwGuardedFunctionStarts[leaf];
+        const uint32_t callerFunction = g_mkwGuardedFunctionStarts[caller];
+        if (callerFunction < start || callerFunction >= end || (leafFunction >= start && leafFunction < end)) continue;
+        if (g_mkwGuestCodePatched[leaf] && !g_mkwGuestCodePatched[caller]) g_mkwGuestCodePatched[caller] = 1;
+    }
+}
+
 void SnapshotLocked(uint32_t start, uint32_t end) {
     for (uint32_t page = start & ~(kPage - 1); page < end; page += kPage) {
         auto& slot = g_pristine[page];
@@ -241,6 +256,7 @@ void ResetPristine(uint32_t start, uint32_t end) {
             const uint32_t function = g_mkwGuardedFunctionStarts[index];
             if (function >= start && function < end) g_mkwGuestCodePatched[index] = 1;
         }
+        RemarkInliningCallersLocked(start, end);
         for (uint32_t page = start & ~(kPage - 1); page < end; page += kPage) g_dirty.erase(page);
         for (auto it = g_loggedWords.begin(); it != g_loggedWords.end();) {
             it = *it >= start && *it < end ? g_loggedWords.erase(it) : std::next(it);
@@ -318,6 +334,7 @@ void ClearRedirect(uint32_t homeStart) {
             const uint32_t function = g_mkwGuardedFunctionStarts[index];
             if (function >= homeStart && function < end) g_mkwGuestCodePatched[index] = 1;
         }
+        RemarkInliningCallersLocked(homeStart, end);
     }
 }
 
