@@ -25,6 +25,7 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.9.1" />  <!-- RVZ disc images (WiiDisc.cs) -->
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../GameConfig.cs;../WiiDisc.cs;../WiiSave.cs;../Gamepads.cs;../ModInstall.cs;../Updater.cs" />
