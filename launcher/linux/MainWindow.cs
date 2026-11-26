@@ -1046,12 +1046,12 @@ sealed class MainWindow : Window
         var progressText = Note("");
         progressText.IsVisible = false;
         void Say(string text) { progressText.Text = text; progressText.IsVisible = text.Length > 0; }  // no empty gap
-        var choose = chooseDisc = Btn("Choose disc image (.iso, .ciso, .wbfs)...", null);
+        var choose = chooseDisc = Btn("Choose disc image (.iso, .ciso, .wbfs, .rvz)...", null);
         choose.HorizontalAlignment = HorizontalAlignment.Left;
         choose.Click += async () =>
         {
-            var file = await PickFile("Choose your Super Smash Bros. Brawl disc image", "Wii disc images (*.iso, *.ciso, *.wbfs)",
-                new[] { "*.iso", "*.ciso", "*.wbfs", "*.ISO", "*.CISO", "*.WBFS" }, null);
+            var file = await PickFile("Choose your Super Smash Bros. Brawl disc image", "Wii disc images (*.iso, *.ciso, *.wbfs, *.rvz)",
+                new[] { "*.iso", "*.ciso", "*.wbfs", "*.rvz", "*.ISO", "*.CISO", "*.WBFS", "*.RVZ" }, null);
             if (file == null) return;
             WiiDisc disc;
             try { disc = WiiDisc.Open(file); }
@@ -1126,7 +1126,7 @@ sealed class MainWindow : Window
             "1. On a Wii with the Homebrew Channel, run CleanRip (or USB Loader GX's install option).\n" +
             "2. Insert Super Smash Bros. Brawl and dump it to an SD card or USB drive. CleanRip writes a .iso " +
             "(it may be split into .part files: join them with  cat game.part* > game.iso ); USB Loader GX writes a .wbfs.\n" +
-            "3. Copy the file to this PC and choose it with the button above. .iso, .ciso and .wbfs all work.\n" +
+            "3. Copy the file to this PC and choose it with the button above. .iso, .ciso, .wbfs and Dolphin's .rvz all work.\n" +
             "The USA release, revision 1, works (the European and Japanese discs do not). " +
             "A Dolphin-extracted folder also works: put it in Disc/DATA next to the launcher."));
     }
@@ -1150,7 +1150,7 @@ sealed class MainWindow : Window
         var (ok, text, _) = DiscStatus();
         playStatus.Text = ok ? "Disc: ready.  SD card: " + SdNames() + ".  Mods: " + ModNames() : text;
         playStatus.Foreground = new SolidColorBrush(ok ? Snow : Orange);
-        chooseDisc.Text = ok ? "Change disc..." : "Choose disc image (.iso, .ciso, .wbfs)...";
+        chooseDisc.Text = ok ? "Change disc..." : "Choose disc image (.iso, .ciso, .wbfs, .rvz)...";
         chooseDisc.Back = ok ? Card : Orange;
         chooseDisc.TextBrush = ok ? SnowBrush : new SolidColorBrush(Night);
         dumpHelp.IsVisible = !ok;

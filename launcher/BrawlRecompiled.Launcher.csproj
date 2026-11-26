@@ -18,6 +18,9 @@
     <ApplicationIcon>smash.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="ZstdSharp.Port" Version="0.9.1" />  <!-- RVZ disc images (WiiDisc.cs) -->
+  </ItemGroup>
+  <ItemGroup>
     <!-- linux\ is its own project -->
     <Compile Remove="linux/**" />
     <None Remove="linux/**" />
